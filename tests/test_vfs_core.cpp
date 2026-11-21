@@ -179,8 +179,103 @@ int main() {
     std::size_t bytes_read = 0;
     OVF_EXPECT(read_aligned_chunk(stream, 5, scratch, bytes_read) == Status::AlignmentError);
     OVF_EXPECT(read_aligned_chunk(stream, 16, scratch, bytes_read) == Status::NotImplemented);
-    std::vector<std::string> listed;
-    OVF_EXPECT(enumerate_mounted_entries(registry, "/data", listed) == Status::NotImplemented);
+
+    // 7. enumerate_mounted_entries over in-memory synthetic registries
+    {
+        const auto make_archive = [](std::string virtual_root, ContainerKind kind) {
+            MountedArchiveInfo info;
+            info.virtual_root = std::move(virtual_root);
+            info.kind = kind;
+            info.file_size = 64;
+            return info;
+        };
+
+        MountRegistry synth;
+        MountPoint data_mount;
+        data_mount.virtual_prefix = "/data";
+        data_mount.discovered_archives.push_back(make_archive("/data/pack_b.rpf", ContainerKind::Rpf9));
+        data_mount.discovered_archives.push_back(make_archive("/data/pack_a.rpf", ContainerKind::Rpf9));
+        data_mount.discovered_archives.push_back(make_archive("/data/stream_0.ttpf", ContainerKind::Rds5));
+        synth.mounts.push_back(std::move(data_mount));
+
+        MountPoint nested_mount;
+        nested_mount.virtual_prefix = "data\\update";  // unnormalized on purpose
+        nested_mount.discovered_archives.push_back(make_archive("/data/update/patch_0.rpf", ContainerKind::Rpf9));
+        // Overlaps a path already exposed by /data; must be listed exactly once.
+        nested_mount.discovered_archives.push_back(make_archive("/data/pack_a.rpf", ContainerKind::Rpf9));
+        synth.mounts.push_back(std::move(nested_mount));
+
+        MountPoint volume_mount;
+        volume_mount.virtual_prefix = "/volume";
+        volume_mount.discovered_archives.push_back(make_archive("volume//./vol_00.xvd", ContainerKind::Xvd));
+        synth.mounts.push_back(std::move(volume_mount));
+
+        MountPoint empty_mount;
+        empty_mount.virtual_prefix = "/empty";
+        synth.mounts.push_back(std::move(empty_mount));
+
+        std::vector<std::string> listed{"stale"};
+
+        // Mount prefix lists its own archives plus nested mounts, sorted and deduplicated
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/data", listed) == Status::Ok);
+        const std::vector<std::string> expected_data{
+            "/data/pack_a.rpf", "/data/pack_b.rpf", "/data/stream_0.ttpf", "/data/update/patch_0.rpf"};
+        OVF_EXPECT(listed == expected_data);
+
+        // Unnormalized prefixes resolve identically
+        OVF_EXPECT(enumerate_mounted_entries(synth, "data\\.\\", listed) == Status::Ok);
+        OVF_EXPECT(listed == expected_data);
+
+        // Root lists everything across mounts with normalized entry paths
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/", listed) == Status::Ok);
+        const std::vector<std::string> expected_root{"/data/pack_a.rpf",
+                                                     "/data/pack_b.rpf",
+                                                     "/data/stream_0.ttpf",
+                                                     "/data/update/patch_0.rpf",
+                                                     "/volume/vol_00.xvd"};
+        OVF_EXPECT(listed == expected_root);
+        OVF_EXPECT(enumerate_mounted_entries(synth, "", listed) == Status::Ok);
+        OVF_EXPECT(listed == expected_root);
+
+        // Sub-prefix inside a mount narrows to that subtree
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/data/update", listed) == Status::Ok);
+        OVF_EXPECT(listed.size() == 1u && listed[0] == "/data/update/patch_0.rpf");
+
+        // Covered prefix with no matching entries is an empty Ok listing
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/empty", listed) == Status::Ok);
+        OVF_EXPECT(listed.empty());
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/data/no_such_dir", listed) == Status::Ok);
+        OVF_EXPECT(listed.empty());
+
+        // Sibling names sharing a string prefix are not treated as children
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/dat", listed) == Status::NotFound);
+        OVF_EXPECT(listed.empty());
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/data/pack_a", listed) == Status::Ok);
+        OVF_EXPECT(listed.empty());
+
+        // A file path itself is not listed as its own child
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/volume/vol_00.xvd", listed) == Status::Ok);
+        OVF_EXPECT(listed.empty());
+
+        // Prefixes outside every mount, and empty registries, report NotFound
+        listed.assign(1, "stale");
+        OVF_EXPECT(enumerate_mounted_entries(synth, "/elsewhere", listed) == Status::NotFound);
+        OVF_EXPECT(listed.empty());
+        const MountRegistry empty_registry;
+        OVF_EXPECT(enumerate_mounted_entries(empty_registry, "/", listed) == Status::NotFound);
+        OVF_EXPECT(listed.empty());
+
+        // Archives discovered by mount_directory on a synthetic host folder are enumerable
+        const auto enum_dir = temp_dir / "enumerate_host";
+        OVF_EXPECT(write_synthetic_file(enum_dir / "pack_0.rpf", make_rpf9_bytes(true)));
+        OVF_EXPECT(write_synthetic_file(enum_dir / "stream_0.ttpf", make_rds5_bytes(true)));
+        OVF_EXPECT(write_synthetic_file(enum_dir / "notes.txt", std::vector<uint8_t>{'x'}));
+        MountRegistry host_registry;
+        OVF_EXPECT(mount_directory(host_registry, "/game", enum_dir) == Status::Ok);
+        OVF_EXPECT(enumerate_mounted_entries(host_registry, "/game", listed) == Status::Ok);
+        const std::vector<std::string> expected_host{"/game/pack_0.rpf", "/game/stream_0.ttpf"};
+        OVF_EXPECT(listed == expected_host);
+    }
 
     std::filesystem::remove_all(temp_dir, ec);
     return open_vfs::test::g_failures == 0 ? 0 : 1;
