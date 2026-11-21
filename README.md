@@ -30,13 +30,13 @@
 
 > [!TIP]
 > **Contribute in 1 Prompt (No Coding Needed)**
-> Open your local Xbox game folder in any AI coding app (Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) while signed in to GitHub (`gh`), copy-paste this line, and press Enter:
+> Open any AI coding app (Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) while signed in to GitHub (`gh`), copy-paste this line, and press Enter:
 >
 > ```text
 > Set up https://github.com/penwin2000/open-vfs and start contributing
 > ```
 >
-> Your AI automatically picks a free part of the port that nobody else is working on, keeps your game files private and read-only, and submits a Pull Request for you. [See how it works](#help-build-it-with-one-prompt)
+> Your AI first asks where your game folder is, then automatically picks a free part of the port that nobody else is working on, keeps your game files private and read-only, and submits a Pull Request for you. [See how it works](#help-build-it-with-one-prompt)
 
 <br>
 
@@ -85,9 +85,9 @@ Set up https://github.com/penwin2000/open-vfs and start contributing
 
 <br>
 
-| Step 1: Open Your Game Folder | Step 2: Send the Short Prompt | Step 3: Let Your AI Build & Submit |
+| Step 1: Send the Short Prompt | Step 2: Tell Your AI Where Your Game Folder Is | Step 3: Let Your AI Build & Submit |
 | :--- | :--- | :--- |
-| Open your local Xbox game folder in **any AI coding harness** while signed in to GitHub (`gh`). | Paste the short prompt above and press Enter. Nothing else is required from you. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), clones into a separate `.open-vfs-repo/` folder, automatically claims an open dark square nobody else is working on, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
+| Open **any AI coding harness** while signed in to GitHub (`gh`), paste the short prompt above, and press Enter. | Your AI always asks for the full path to your local Xbox game folder before doing anything else. Paste it in and the AI checks the folder read-only. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), clones into a separate `.open-vfs-repo/` folder inside your game folder, automatically claims an open dark square nobody else is working on, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
 
 <br>
 

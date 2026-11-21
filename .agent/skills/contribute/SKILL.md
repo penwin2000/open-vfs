@@ -1,11 +1,11 @@
 ---
 name: contribute
-description: Automatically bootstrap penwin2000/open-vfs inside .open-vfs-repo/, pick an unclaimed OPEN_VFS_STUB using idle-module spreading, claim and verify the lock via Claim-Key and monotonic GitHub issue numbers, inspect local container headers read-only without copying data, implement clean-room C++20 code and synthetic CTest coverage, verify Windows Release builds and CI checks, open a cross-repo fork PR or direct PR, and squash-merge after checks pass.
+description: Always ask the user for their local game data folder first, then bootstrap penwin2000/open-vfs inside .open-vfs-repo/, pick an unclaimed OPEN_VFS_STUB using idle-module spreading, claim and verify the lock via Claim-Key and monotonic GitHub issue numbers, inspect local container headers read-only without copying data, implement clean-room C++20 code and synthetic CTest coverage, verify Windows Release builds and CI checks, open a cross-repo fork PR or direct PR, and squash-merge after checks pass.
 ---
 
 # `open-vfs` Autonomous Clean-Room Contributor Skill
 
-Use this skill whenever a user in a local archive workspace asks to:
+Use this skill whenever a user asks to:
 > `Set up https://github.com/penwin2000/open-vfs and start contributing`
 
 or asks to claim and implement the next pending `OPEN_VFS_STUB` task in `penwin2000/open-vfs`.
@@ -24,8 +24,16 @@ or asks to claim and implement the next pending `OPEN_VFS_STUB` task in `penwin2
 
 ## Step-by-Step Execution Procedure
 
+### Step 0: Ask the User for Their Local Game Data Folder (Always)
+Before cloning, picking a stub, or running any other command, **always ask the user in chat** for the absolute path to their local game data folder (the folder holding their own archive files), then **wait for their answer**.
+- Ask even when the current working directory already looks like a data folder. In that case, offer it as the suggested answer, but still wait for the user to confirm it.
+- Never search the disk for archives, guess the location, or infer it from other folders, recent files, or harness history.
+- Once the user answers, confirm read-only that the path exists and is a directory. Count the container files by extension (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`, `*.pri`) and report the counts to the user. If the folder is missing or holds no container files, say so and ask again.
+- If the user says they have no game folder or would rather not share it, continue in **no-data mode**: skip Step 5 and pick only stubs outside `rpf9`, `rds5`, and `xvd`.
+- The confirmed path (`<data_dir>`) is local-only knowledge. Never write it, or any file name inside it, into the repository, a commit, an issue, or a pull request.
+
 ### Step 1: Clone or Refresh `.open-vfs-repo/` & Detect Permissions
-Check whether `.open-vfs-repo/.git` exists in the current workspace:
+Use `<data_dir>/.open-vfs-repo/` as the repository folder (in no-data mode, use `.open-vfs-repo/` in the current workspace). Check whether `.open-vfs-repo/.git` exists there:
 - If absent:
   ```powershell
   git clone https://github.com/penwin2000/open-vfs.git .open-vfs-repo
@@ -97,8 +105,8 @@ git -C .open-vfs-repo checkout -b feat/m<num>-<module>-<symbol>
 ```
 
 ### Step 5: Mandatory Read-Only Local Container Header Inspection
-**Required for `rpf9`, `rds5`, and `xvd` parsers:** Before writing or modifying any parser struct, offset calculation, or header reader in `src/rpf9/`, `src/rds5/`, or `src/xvd/`, you **must** inspect matching local container headers (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`) in the parent workspace strictly **read-only** first (small leading header slices, e.g. 64–4096 bytes) so struct layouts, field widths, magic constants (`0x52504639`, `0x52445335`, `0x1DD3014E` / `"msft-xvd"` at offset `0x000` or `0x200`), endianness, flags, and 16-byte alignment constraints match real binary bytes.
-- Never write into the parent workspace.
+**Required for `rpf9`, `rds5`, and `xvd` parsers:** Before writing or modifying any parser struct, offset calculation, or header reader in `src/rpf9/`, `src/rds5/`, or `src/xvd/`, you **must** inspect matching local container headers (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`) in the user-confirmed `<data_dir>` from Step 0 strictly **read-only** first (small leading header slices, e.g. 64–4096 bytes) so struct layouts, field widths, magic constants (`0x52504639`, `0x52445335`, `0x1DD3014E` / `"msft-xvd"` at offset `0x000` or `0x200`), endianness, flags, and 16-byte alignment constraints match real binary bytes.
+- Never write into `<data_dir>` itself (only into `<data_dir>/.open-vfs-repo/`).
 - Never copy binary payloads, hashes, string tables, or local filenames/paths into `.open-vfs-repo/`.
 
 ### Step 6: Implement Clean-Room C++20 Function & Synthetic Tests
