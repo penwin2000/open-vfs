@@ -21,6 +21,23 @@ enum class ContainerKind : uint8_t {
     Rds5 = 2,
     Xvd = 3,
     AlignmentChunk = 4,
+    Pri = 5,
+};
+
+struct DataLayoutFingerprint {
+    std::size_t rpf9_count = 0;
+    std::size_t rds5_count = 0;
+    std::size_t xvd_count = 0;
+    std::size_t pri_count = 0;
+
+    constexpr bool operator==(const DataLayoutFingerprint&) const noexcept = default;
+};
+
+constexpr DataLayoutFingerprint kExpectedDataLayout{
+    22,  // RPF9 containers
+    57,  // RDS5 containers
+    1,   // XVD volume
+    1,   // PRI resource index
 };
 
 struct MountedArchiveInfo {
@@ -60,7 +77,10 @@ uint64_t align_up_16(uint64_t value) noexcept;
 std::string normalize_virtual_path(std::string_view raw_path);
 std::string join_virtual_path(std::string_view base_path, std::string_view relative_path);
 
-// Virtual filesystem mount manager
+// Virtual filesystem mount manager & anonymous layout fingerprint validator
+Status verify_data_layout(const std::filesystem::path& host_dir,
+                          DataLayoutFingerprint* out_observed = nullptr);
+
 Status mount_directory(MountRegistry& registry,
                        std::string_view virtual_prefix,
                        const std::filesystem::path& host_dir);

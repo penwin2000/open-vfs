@@ -1,12 +1,76 @@
 #include "vfs_core.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstddef>
+#include <fstream>
 #include <open_vfs/macros.hpp>
 
 namespace open_vfs::vfs_core {
 
 namespace {
+
+constexpr uint32_t kRpf9Magic = 0x52504639u;
+constexpr uint32_t kRpf9MagicAsciiLe = 0x39465052u;
+constexpr uint32_t kRds5Magic = 0x52445335u;
+constexpr uint32_t kRds5MagicAsciiLe = 0x35534452u;
+constexpr uint32_t kXvdMagic = 0x1DD3014Eu;
+constexpr std::size_t kXvdSignedHeaderOffset = 0x200u;
+constexpr std::size_t kMagicProbeSize = 0x210u;
+
+constexpr std::array<uint8_t, 8> kXvdSignature = {'m', 's', 'f', 't', '-', 'x', 'v', 'd'};
+constexpr std::array<uint8_t, 7> kPriPrefix = {'m', 'r', 'm', '_', 'p', 'r', 'i'};
+constexpr std::array<uint8_t, 8> kPriVnxtSignature = {'m', 'r', 'm', '_', 'v', 'n', 'x', 't'};
+
+bool matches_bytes_at(std::span<const uint8_t> data,
+                      std::size_t offset,
+                      std::span<const uint8_t> needle) noexcept {
+    if (offset > data.size() || data.size() - offset < needle.size()) {
+        return false;
+    }
+    return std::equal(needle.begin(),
+                      needle.end(),
+                      data.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+ContainerKind classify_magic_header(std::span<const uint8_t> header) noexcept {
+    const auto magic_le = read_u32_le(header, 0);
+    if (!magic_le.has_value()) {
+        return ContainerKind::Unknown;
+    }
+
+    if (*magic_le == kRpf9Magic || *magic_le == kRpf9MagicAsciiLe) {
+        return ContainerKind::Rpf9;
+    }
+    if (*magic_le == kRds5Magic || *magic_le == kRds5MagicAsciiLe) {
+        return ContainerKind::Rds5;
+    }
+
+    if (header.size() >= 8u) {
+        if (matches_bytes_at(header, 0, kPriPrefix)) {
+            const uint8_t ver = header[7];
+            if (ver == '0' || ver == '1' || ver == '2' || ver == '3' || ver == 'f') {
+                return ContainerKind::Pri;
+            }
+        }
+        if (matches_bytes_at(header, 0, kPriVnxtSignature)) {
+            return ContainerKind::Pri;
+        }
+        if (matches_bytes_at(header, 0, kXvdSignature)) {
+            return ContainerKind::Xvd;
+        }
+    }
+
+    if (*magic_le == kXvdMagic && matches_bytes_at(header, 4, kXvdSignature)) {
+        return ContainerKind::Xvd;
+    }
+    if (matches_bytes_at(header, kXvdSignedHeaderOffset, kXvdSignature)) {
+        return ContainerKind::Xvd;
+    }
+
+    return ContainerKind::Unknown;
+}
 
 ContainerKind classify_extension(const std::filesystem::path& path) {
     std::string ext = path.extension().string();
@@ -127,6 +191,99 @@ std::string join_virtual_path(std::string_view base_path, std::string_view relat
     combined.push_back('/');
     combined.append(relative_path);
     return normalize_virtual_path(combined);
+}
+
+OPEN_VFS_IMPL
+Status verify_data_layout(const std::filesystem::path& host_dir,
+                          DataLayoutFingerprint* out_observed) {
+    if (out_observed != nullptr) {
+        *out_observed = DataLayoutFingerprint{};
+    }
+
+    std::error_code ec;
+    if (host_dir.empty() || !std::filesystem::exists(host_dir, ec) ||
+        !std::filesystem::is_directory(host_dir, ec)) {
+        return Status::NotFound;
+    }
+
+    DataLayoutFingerprint observed{};
+    std::array<uint8_t, kMagicProbeSize> probe_buf{};
+
+    std::filesystem::recursive_directory_iterator it(
+        host_dir, std::filesystem::directory_options::skip_permission_denied, ec);
+    if (ec) {
+        return Status::ErrUnsupportedDataLayout;
+    }
+
+    const std::filesystem::recursive_directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        const auto& entry = *it;
+        std::error_code entry_ec;
+
+        if (entry.is_directory(entry_ec) && !entry_ec) {
+            const auto name_path = entry.path().filename();
+            const auto& native_name = name_path.native();
+            if (!native_name.empty() &&
+                native_name.front() == static_cast<std::filesystem::path::value_type>('.')) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+
+        if (!entry.is_regular_file(entry_ec) || entry_ec) {
+            continue;
+        }
+
+        const auto file_size = entry.file_size(entry_ec);
+        if (entry_ec || file_size < 4u) {
+            continue;
+        }
+
+        std::ifstream file(entry.path(), std::ios::binary);
+        if (!file.is_open()) {
+            continue;
+        }
+
+        file.read(reinterpret_cast<char*>(probe_buf.data()),
+                  static_cast<std::streamsize>(probe_buf.size()));
+        if (file.bad()) {
+            continue;
+        }
+
+        const std::streamsize raw_read = file.gcount();
+        if (raw_read < 4) {
+            continue;
+        }
+
+        const std::span<const uint8_t> header(probe_buf.data(),
+                                              static_cast<std::size_t>(raw_read));
+        switch (classify_magic_header(header)) {
+            case ContainerKind::Rpf9:
+                ++observed.rpf9_count;
+                break;
+            case ContainerKind::Rds5:
+                ++observed.rds5_count;
+                break;
+            case ContainerKind::Xvd:
+                ++observed.xvd_count;
+                break;
+            case ContainerKind::Pri:
+                ++observed.pri_count;
+                break;
+            case ContainerKind::AlignmentChunk:
+            case ContainerKind::Unknown:
+                break;
+        }
+    }
+
+    if (out_observed != nullptr) {
+        *out_observed = observed;
+    }
+
+    if (observed != kExpectedDataLayout) {
+        return Status::ErrUnsupportedDataLayout;
+    }
+    return Status::Ok;
 }
 
 OPEN_VFS_IMPL
