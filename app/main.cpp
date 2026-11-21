@@ -130,7 +130,29 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 1. Mount local read-only archive directory into virtual filesystem
+    // 1. Verify anonymous folder fingerprint read-only before mounting
+    open_vfs::vfs_core::DataLayoutFingerprint observed_layout{};
+    const auto layout_status =
+        open_vfs::vfs_core::verify_data_layout(options.data_dir, &observed_layout);
+    if (layout_status != open_vfs::Status::Ok) {
+        std::cerr << "[vfs] Incompatible --data-dir layout ("
+                  << open_vfs::status_to_string(layout_status)
+                  << "): observed RPF9=" << observed_layout.rpf9_count
+                  << ", RDS5=" << observed_layout.rds5_count
+                  << ", XVD=" << observed_layout.xvd_count
+                  << ", PRI=" << observed_layout.pri_count
+                  << " (expected RPF9=" << open_vfs::vfs_core::kExpectedDataLayout.rpf9_count
+                  << ", RDS5=" << open_vfs::vfs_core::kExpectedDataLayout.rds5_count
+                  << ", XVD=" << open_vfs::vfs_core::kExpectedDataLayout.xvd_count
+                  << ", PRI=" << open_vfs::vfs_core::kExpectedDataLayout.pri_count << ").\n";
+        return 2;
+    }
+    std::cout << "[vfs] Data layout verified (RPF9: " << observed_layout.rpf9_count
+              << ", RDS5: " << observed_layout.rds5_count
+              << ", XVD: " << observed_layout.xvd_count
+              << ", PRI: " << observed_layout.pri_count << ").\n";
+
+    // 2. Mount local read-only archive directory into virtual filesystem
     open_vfs::vfs_core::MountRegistry vfs;
     const auto mount_status = open_vfs::vfs_core::mount_directory(vfs, "/data", options.data_dir);
     if (mount_status != open_vfs::Status::Ok) {
@@ -140,7 +162,7 @@ int main(int argc, char** argv) {
     }
     probe_archive_headers(vfs.mounts.front());
 
-    // 2. Initialize native Win32 window and DirectX 12 context
+    // 3. Initialize native Win32 window and DirectX 12 context
     open_vfs::render::SwapchainConfig swapchain_cfg{};
     if (!open_vfs::render::validate_swapchain_config(swapchain_cfg)) {
         std::cerr << "[render] Invalid default swapchain configuration.\n";
@@ -166,7 +188,7 @@ int main(int argc, char** argv) {
         std::cout << "[render] DX12 device bootstrap pending (stub active; continuing runtime loop).\n";
     }
 
-    // 3. Initialize audio format, input snapshot, and world VM state
+    // 4. Initialize audio format, input snapshot, and world VM state
     open_vfs::audio::AudioFormat audio_fmt{};
     open_vfs::audio::AudioDeviceContext audio_ctx{};
     if (open_vfs::audio::validate_audio_format(audio_fmt)) {
@@ -177,7 +199,7 @@ int main(int argc, char** argv) {
     const auto root_entity = open_vfs::world_vm::create_entity(entities);
     open_vfs::world_vm::SimulationClock sim_clock{};
 
-    // 4. Main desktop loop
+    // 5. Main desktop loop
     auto prev_time = std::chrono::steady_clock::now();
     while (open_vfs::render::pump_win32_messages(window)) {
         const auto now = std::chrono::steady_clock::now();

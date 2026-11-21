@@ -69,14 +69,25 @@ Source code is strictly partitioned into eight isolated static library modules s
 
 ---
 
+## Prebuilt Binary vs Local Build
+
+| Option | Best For | How to Obtain | Requirements |
+| :--- | :--- | :--- | :--- |
+| **Prebuilt Binary** | Running `open-vfs.exe` directly against your local archive folder | Download `open-vfs.exe` from [GitHub Releases](https://github.com/penwin2000/open-vfs/releases) (`v*` tags) or the latest `open-vfs-win64` artifact on [`main` CI runs](https://github.com/penwin2000/open-vfs/actions/workflows/progress.yml?query=branch%3Amain) | Windows 11 (x64) + DX12 GPU (no compiler needed) |
+| **Local Build** | Developing subsystems, modifying parsers, or running CTest locally | Clone the repo and compile Release with CMake + MSVC (`cmake --build build --config Release -- /m:1 /nr:false`) | Visual Studio 2022+ (MSVC C++20) + CMake 3.25+ |
+
+> At startup, `open-vfs.exe --data-dir <path>` scans container magic headers read-only (`verify_data_layout`) and exits immediately with `ErrUnsupportedDataLayout` if the directory does not match the expected anonymous container profile.
+
+---
+
 ## Quick Start & Build Commands
 
 <details>
-<summary><strong>Configure &amp; Build <code>open-vfs.exe</code> (MSVC / Visual Studio 2022)</strong></summary>
+<summary><strong>Configure &amp; Build <code>open-vfs.exe</code> (MSVC / Visual Studio)</strong></summary>
 
 ```powershell
-cmake -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release --parallel
+cmake -B build -A x64
+cmake --build build --config Release -- /m:1 /nr:false
 ```
 
 </details>
