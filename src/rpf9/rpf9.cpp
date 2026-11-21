@@ -1,5 +1,6 @@
 #include "rpf9.hpp"
 
+#include <limits>
 #include <open_vfs/macros.hpp>
 #include "../vfs_core/vfs_core.hpp"
 
@@ -65,14 +66,50 @@ Status parse_rpf9_toc_entry(std::span<const uint8_t> entry_bytes, Rpf9TocEntry& 
     return Status::Ok;
 }
 
-OPEN_VFS_STUB
+OPEN_VFS_IMPL
 Status parse_rpf9_toc_table(std::span<const uint8_t> archive_bytes,
                             const Rpf9Header& header,
                             std::vector<Rpf9TocEntry>& out_entries) {
-    (void)archive_bytes;
-    (void)header;
     out_entries.clear();
-    return Status::NotImplemented;
+
+    if (!validate_rpf9_magic(header.magic)) {
+        return Status::InvalidMagic;
+    }
+    if (!vfs_core::is_aligned_16(header.toc_offset)) {
+        return Status::AlignmentError;
+    }
+
+    const uint64_t archive_size = static_cast<uint64_t>(archive_bytes.size());
+    if (header.toc_offset > archive_size) {
+        return Status::OutOfBounds;
+    }
+
+    const uint64_t entry_count = static_cast<uint64_t>(header.entry_count);
+    constexpr uint64_t kEntrySize = static_cast<uint64_t>(kRpf9TocEntrySize);
+    if (entry_count > (std::numeric_limits<uint64_t>::max() / kEntrySize)) {
+        return Status::OutOfBounds;
+    }
+
+    const uint64_t table_size = entry_count * kEntrySize;
+    if (table_size > archive_size - header.toc_offset) {
+        return Status::OutOfBounds;
+    }
+
+    out_entries.reserve(static_cast<std::size_t>(entry_count));
+    std::size_t cursor = static_cast<std::size_t>(header.toc_offset);
+    for (uint32_t i = 0; i < header.entry_count; ++i) {
+        Rpf9TocEntry entry{};
+        const Status status = parse_rpf9_toc_entry(
+            archive_bytes.subspan(cursor, kRpf9TocEntrySize), entry);
+        if (status != Status::Ok) {
+            out_entries.clear();
+            return status;
+        }
+        out_entries.push_back(entry);
+        cursor += kRpf9TocEntrySize;
+    }
+
+    return Status::Ok;
 }
 
 OPEN_VFS_STUB
