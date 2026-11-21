@@ -1,33 +1,176 @@
 <p align="center">
-  <img src="./assets/banner.svg" alt="open-vfs — Clean-Room C++20 and DirectX 12 Standalone Windows 11 Runtime" width="100%" />
+  <img src="./assets/banner.svg" alt="open-vfs: Native Windows 11 PC Port Runtime" width="100%" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/penwin2000/open-vfs/actions/workflows/progress.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/penwin2000/open-vfs/progress.yml?branch=main&style=flat-square&label=Build" alt="Build Status" />
-  </a>
-  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++20" />
-  <img src="https://img.shields.io/badge/Graphics-DirectX%2012-107C10?style=flat-square" alt="DirectX 12" />
-  <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-2563EB?style=flat-square" alt="MIT License" />
-  </a>
+  <a href="https://github.com/penwin2000/open-vfs/actions/workflows/progress.yml"><img src="https://img.shields.io/github/actions/workflow/status/penwin2000/open-vfs/progress.yml?branch=main&style=flat-square&label=Build" alt="Build Status" height="20" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2011-0078D6?style=flat-square" alt="Windows 11" height="20" />
+  <img src="https://img.shields.io/badge/Graphics-DirectX%2012-107C10?style=flat-square" alt="DirectX 12" height="20" />
+  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++20" height="20" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-2563EB?style=flat-square" alt="MIT License" height="20" /></a>
 </p>
+
+<h3 align="center">Porting the matching Xbox game to run natively on Windows 11 PC.</h3>
+
+<p align="center">
+  <a href="#the-goal"><strong>The Goal</strong></a>
+  &nbsp;&middot;&nbsp;
+  <a href="#help-build-it-with-one-prompt"><strong>Contribute in One Prompt</strong></a>
+  &nbsp;&middot;&nbsp;
+  <a href="#check-if-your-folder-matches"><strong>Check Your Folder</strong></a>
+  &nbsp;&middot;&nbsp;
+  <a href="#road-to-playable-on-pc"><strong>Roadmap</strong></a>
+  &nbsp;&middot;&nbsp;
+  <a href="#try-it-on-windows-11"><strong>Try It</strong></a>
+  &nbsp;&middot;&nbsp;
+  <a href="#for-developers"><strong>For Developers</strong></a>
+</p>
+
+<br>
 
 <p align="center">
   <a href="https://penwin2000.github.io/open-vfs/">
-    <img src="./progress.svg" alt="open-vfs live subsystem tile map" width="100%" />
+    <img src="./progress.svg" alt="open-vfs live progress tile map" width="100%" />
   </a>
 </p>
 
+<p align="center">
+  <sub>Green squares are finished parts of the PC port. Dark squares are still left to build. Click the map for the live interactive view.</sub>
+</p>
+
+<br>
+
 ---
 
-**`open-vfs`** is a clean-room **C++20** and **DirectX 12** native Windows 11 desktop runtime (`open-vfs.exe`) built from scratch to mount, decode, and execute user-supplied local console asset archives (`.rpf`, `.ttpf`, `.xvd`, `.alignmentchunk`) without relying on any proprietary executable or redistributed data.
+<br>
 
-> **Clean-Room Policy:** This repository contains **zero** copyrighted assets, binaries, encryption keys, local dump filenames, or commercial identifiers. Contributors supply their own local read-only archive folder at runtime via `--data-dir <path>`.
+## The Goal
+
+**`open-vfs`** is an open community project with one clear mission: **port the Xbox game that matches our expected folder layout so it runs natively on PC (Windows 11)** as a standalone app (`open-vfs.exe`).
+
+You bring your own local copy of the Xbox game folder ([check if your folder matches](#check-if-your-folder-matches)). When you launch `open-vfs.exe`, it automatically checks that your folder matches the right layout, reads the game files directly from your drive without modifying them, and rebuilds the graphics, audio, controls, and world simulation natively for Windows 11 with DirectX 12.
+
+<br>
+
+> [!IMPORTANT]
+> **100% Clean-Room & Legal.** This repository contains zero copyrighted game files, binaries, keys, or commercial game titles. Every line of code here is written from scratch so anyone can safely share improvements and help finish the PC port.
+
+<br>
 
 ---
 
-## System Requirements
+<br>
+
+## Help Build It With One Prompt
+
+**You do not need to know how to code to help port this game to PC.** If you have the matching Xbox game folder on your computer, you can contribute a real piece of the Windows 11 port using **any AI coding harness** (Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Antigravity, or any similar coding agent).
+
+Copy and send this single short prompt inside your AI coding tool:
+
+```text
+Set up https://github.com/penwin2000/open-vfs and start contributing
+```
+
+<br>
+
+| Step 1: Open Your Game Folder | Step 2: Send the Short Prompt | Step 3: Let Your AI Build & Submit |
+| :--- | :--- | :--- |
+| Open your local Xbox game folder in **any AI coding harness** while signed in to GitHub (`gh`). | Paste the short prompt above and press Enter. Nothing else is required from you. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), clones into a separate `.open-vfs-repo/` folder, picks one dark square from the map above, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
+
+<br>
+
+> [!TIP]
+> **Your private files never leave your PC.** Every harness follows strict read-only rules so your game files are never copied or uploaded, and our automated `PR Guard` checks every Pull Request before merge. Prefer contributing manually as a C++ developer? Follow the walkthrough in [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md).
+
+<br>
+
+---
+
+<br>
+
+## Check If Your Folder Matches
+
+Not sure if you have the right Xbox game folder? You can check in two seconds using Windows Terminal without downloading anything.
+
+<br>
+
+| Step 1: Open Terminal in Your Folder | Step 2: Paste & Run the Check |
+| :--- | :--- |
+| Open your Xbox game folder in File Explorer, right-click an empty spot inside it, and select **Open in Terminal**. | Copy the command below, paste it into Terminal, and press Enter. It reads only tiny file headers (read-only) and prints green **`MATCH`** if your folder matches. |
+
+<br>
+
+```powershell
+$c=@{RPF9=0;RDS5=0;XVD=0;PRI=0}; $b=New-Object byte[] 528; $e=[Text.Encoding]::GetEncoding(28591); Get-ChildItem -Recurse -File -EA 0 | Where-Object { $_.DirectoryName.Substring($PWD.Path.Length) -notmatch '(^|[\\/])\.' } | ForEach-Object { $fs=$null; try { $fs=[IO.File]::OpenRead($_.FullName); $n=$fs.Read($b,0,528); if($n -ge 4){ $s=$e.GetString($b,0,$n); $m=$s.Substring(0,4); if($m -cin 'RPF9','9FPR'){$c.RPF9++} elseif($m -cin 'RDS5','5SDR'){$c.RDS5++} elseif($n -ge 8 -and $s.Substring(0,8) -cmatch '^mrm_(pri[0123f]|vnxt)$'){$c.PRI++} elseif(($n -ge 8 -and $s.Substring(0,8) -ceq 'msft-xvd') -or ($n -ge 12 -and [BitConverter]::ToUInt32($b,0) -eq 0x1DD3014E -and $s.Substring(4,8) -ceq 'msft-xvd') -or ($n -ge 520 -and $s.Substring(512,8) -ceq 'msft-xvd')){$c.XVD++} } } catch {} finally { if($fs){$fs.Dispose()} } }; $id="RPF9=$($c.RPF9) RDS5=$($c.RDS5) XVD=$($c.XVD) PRI=$($c.PRI)"; if($id -eq 'RPF9=22 RDS5=57 XVD=1 PRI=1'){ Write-Host "MATCH ($id)" -ForegroundColor Green } else { Write-Host "NO MATCH ($id)" -ForegroundColor Red }
+```
+
+<br>
+
+> [!NOTE]
+> **Already downloaded `open-vfs.exe`?** You can run the exact same built-in check with `.\open-vfs.exe --data-dir "path\to\your\game_folder" --headless` and look for `[vfs] Data layout verified`.
+
+<br>
+
+---
+
+<br>
+
+## Road to Playable on PC
+
+We are building the PC port in four clear stages, matching the `M1` through `M4` rows on the progress map above.
+
+<br>
+
+| Stage | What It Unlocks on Windows 11 | Modules |
+| :--- | :--- | :--- |
+| **[Stage 1: Reading the Game Files (M1)](https://github.com/penwin2000/open-vfs/milestone/1)** | Opens and unpacks the Xbox game's archive containers cleanly on Windows. | `vfs_core`, `rpf9`, `rds5`, `xvd` |
+| **[Stage 2: Graphics & Display (M2)](https://github.com/penwin2000/open-vfs/milestone/2)** | Opens a native Windows 11 window and draws textures and 3D worlds with DirectX 12. | `render` |
+| **[Stage 3: Sound, Controls & World (M3)](https://github.com/penwin2000/open-vfs/milestone/3)** | Plays Windows audio, supports Xbox controllers plus keyboard and mouse, and runs physics and game scripts. | `audio`, `input`, `world_vm` |
+| **[Stage 4: Playable on PC (M4)](https://github.com/penwin2000/open-vfs/milestone/4)** | Connects every system together for smooth 60+ FPS gameplay on Windows 11. | Full PC integration |
+
+<br>
+
+---
+
+<br>
+
+## Try It on Windows 11
+
+You can test the latest build right away with no programming tools installed, or compile `open-vfs.exe` locally from source.
+
+<br>
+
+| Option | Best For | How to Get It | What You Need |
+| :--- | :--- | :--- | :--- |
+| **Ready-Made App (Prebuilt)** | Trying `open-vfs.exe` right away against your local game folder | Download `open-vfs.exe` from [GitHub Releases](https://github.com/penwin2000/open-vfs/releases) or the latest `open-vfs-win64` artifact on [`main` CI runs](https://github.com/penwin2000/open-vfs/actions/workflows/progress.yml?query=branch%3Amain) | Windows 11 (64-bit) and a DirectX 12 GPU |
+| **Build From Source** | Developing modules, testing edits, or running the local test suite | Clone this repository and compile Release with CMake and Visual Studio 2022 | Visual Studio 2022+ (C++20) and CMake 3.25+ |
+
+<br>
+
+Point `open-vfs.exe` at your local Xbox game folder to run it:
+
+```powershell
+.\open-vfs.exe --data-dir "path\to\your\game_folder"
+```
+
+At startup, `open-vfs.exe` inspects your folder read-only and exits cleanly with `ErrUnsupportedDataLayout` if the directory does not match the expected Xbox game layout.
+
+<br>
+
+---
+
+<br>
+
+## For Developers
+
+Expand any section below for technical requirements, module layout, and local build or test commands.
+
+<br>
+
+<details>
+<summary><strong>System Requirements</strong></summary>
+
+<br>
 
 | Requirement | Minimum / Supported | Notes |
 | :--- | :--- | :--- |
@@ -38,11 +181,20 @@
 | **Scripting** | Python 3.10+ | Standard-library-only `tools/progress.py` scanner |
 | **Collaboration CLI** | GitHub CLI (`gh`) | Automated Issue -> Branch -> Milestone -> PR flow |
 
----
+<br>
 
-## Subsystem Architecture
+</details>
 
-Source code is strictly partitioned into eight isolated static library modules so concurrent contributors never collide on shared files. See [ARCHITECTURE.md](./ARCHITECTURE.md) for binary layouts and dependency diagrams.
+<br>
+
+<details>
+<summary><strong>Subsystem Architecture (8 Isolated Modules)</strong></summary>
+
+<br>
+
+Source code is split into eight isolated static library modules so multiple contributors and AI harnesses can work in parallel without merge conflicts. See [ARCHITECTURE.md](./ARCHITECTURE.md) for binary layouts and dependency diagrams.
+
+<br>
 
 | Module | Directory | Responsibility | Milestone |
 | :--- | :--- | :--- | :--- |
@@ -56,89 +208,51 @@ Source code is strictly partitioned into eight isolated static library modules s
 | **World VM** | `src/world_vm/` | Generational entity registry, world loader, physics step, and script bytecode VM | `M3` / `M4` |
 | **Desktop App** | `app/main.cpp` | `open-vfs.exe` entry point mounting `--data-dir` and driving the simulation loop | All |
 
----
+<br>
 
-## Porting Milestones
+</details>
 
-| Milestone | Scope | Completion Criteria |
-| :--- | :--- | :--- |
-| **[M1: VFS & Containers](https://github.com/penwin2000/open-vfs/milestone/1)** | `vfs_core`, `rpf9`, `rds5`, `xvd` | Mount local archive tree, parse TOC/descriptors/partitions, extract aligned streams |
-| **[M2: DX12 Render & Assets](https://github.com/penwin2000/open-vfs/milestone/2)** | `render` | Win32 + DX12 swapchain, BC texture decoding, HLSL pipeline, mesh draw submission |
-| **[M3: Audio, Input & World VM](https://github.com/penwin2000/open-vfs/milestone/3)** | `audio`, `input`, `world_vm` | WASAPI output + stream codecs, gamepad/KBM input, physics step, bytecode VM execution |
-| **[M4: Playable PC Parity](https://github.com/penwin2000/open-vfs/milestone/4)** | Cross-module integration | World sector streaming, native opcode dispatch, 60+ FPS desktop parity |
-
----
-
-## Prebuilt Binary vs Local Build
-
-| Option | Best For | How to Obtain | Requirements |
-| :--- | :--- | :--- | :--- |
-| **Prebuilt Binary** | Running `open-vfs.exe` directly against your local archive folder | Download `open-vfs.exe` from [GitHub Releases](https://github.com/penwin2000/open-vfs/releases) (`v*` tags) or the latest `open-vfs-win64` artifact on [`main` CI runs](https://github.com/penwin2000/open-vfs/actions/workflows/progress.yml?query=branch%3Amain) | Windows 11 (x64) + DX12 GPU (no compiler needed) |
-| **Local Build** | Developing subsystems, modifying parsers, or running CTest locally | Clone the repo and compile Release with CMake + MSVC (`cmake --build build --config Release -- /m:1 /nr:false`) | Visual Studio 2022+ (MSVC C++20) + CMake 3.25+ |
-
-> At startup, `open-vfs.exe --data-dir <path>` scans container magic headers read-only (`verify_data_layout`) and exits immediately with `ErrUnsupportedDataLayout` if the directory does not match the expected anonymous container profile.
-
----
-
-## Quick Start & Build Commands
+<br>
 
 <details>
-<summary><strong>Configure &amp; Build <code>open-vfs.exe</code> (MSVC / Visual Studio)</strong></summary>
+<summary><strong>Build, Test &amp; Progress Commands</strong></summary>
+
+<br>
+
+**Configure & build with MSVC (Visual Studio 2022):**
 
 ```powershell
 cmake -B build -A x64
 cmake --build build --config Release -- /m:1 /nr:false
 ```
 
-</details>
+<br>
 
-<details>
-<summary><strong>Configure &amp; Build with Ninja (Developer PowerShell)</strong></summary>
+**Configure & build with Ninja (Developer PowerShell):**
 
 ```powershell
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-</details>
+<br>
 
-<details>
-<summary><strong>Run Synthetic-Buffer CTest Suite &amp; Launch <code>open-vfs.exe</code></strong></summary>
+**Run synthetic-buffer unit tests & headless probe:**
 
 ```powershell
-# Run all 8 isolated module unit test suites
 ctest --test-dir build -C Release --output-on-failure
-
-# Launch standalone runtime against your local read-only archive folder
-.\build\Release\open-vfs.exe --data-dir "D:\path\to\local_archives"
-
-# Run a single headless mount + container header probe tick
-.\build\Release\open-vfs.exe --data-dir "D:\path\to\local_archives" --headless
+.\build\Release\open-vfs.exe --data-dir "path\to\your\game_folder" --headless
 ```
 
-</details>
+<br>
 
-<details>
-<summary><strong>Scan Implementation Progress &amp; Regenerate <code>progress.svg</code></strong></summary>
+**Scan implementation progress & regenerate `progress.svg`:**
 
 ```powershell
-# Emit structured JSON of all OPEN_VFS_IMPL and OPEN_VFS_STUB functions
 python tools/progress.py --scan
-
-# Regenerate the dense module tile map SVG
 python tools/progress.py --output progress.svg
 ```
 
+<br>
+
 </details>
-
----
-
-## Contributing & Autonomous Agent Setup
-
-Every task follows the strict **Issue -> Branch -> Milestone -> PR** lifecycle described in [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md).
-
-If you open your local archive folder in Antigravity and send:
-
-> `Set up https://github.com/penwin2000/open-vfs and start contributing`
-
-the agent automatically clones this repository into `.open-vfs-repo/`, picks an unclaimed `OPEN_VFS_STUB` symbol, opens a milestone-tracked issue, creates `feat/m<num>-<module>-<symbol>`, inspects matching local archive headers read-only without copying any data, implements the clean-room C++20 function with synthetic CTest coverage, and opens a verified pull request.
