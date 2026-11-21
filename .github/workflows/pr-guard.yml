@@ -1,0 +1,74 @@
+name: PR Guard
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "pr-guard-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  pr-guard:
+    name: PR Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (read-only diff inspection)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Select trusted PR Guard script and base ref
+        id: guard_setup
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork == true || github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+
+          if git rev-parse --verify "origin/${BASE_REF}^{commit}" >/dev/null 2>&1; then
+            DIFF_BASE="origin/${BASE_REF}"
+          else
+            DIFF_BASE="${BASE_SHA}"
+          fi
+
+          if [ "${IS_FORK}" = "true" ] && git cat-file -e "${DIFF_BASE}:tools/pr_guard.py" 2>/dev/null; then
+            GUARD_SCRIPT="${RUNNER_TEMP}/pr_guard.py"
+            git show "${DIFF_BASE}:tools/pr_guard.py" > "${GUARD_SCRIPT}"
+            echo "Using trusted base-branch tools/pr_guard.py for external fork PR."
+          else
+            GUARD_SCRIPT="tools/pr_guard.py"
+            echo "Using repository tools/pr_guard.py."
+          fi
+
+          echo "diff_base=${DIFF_BASE}" >> "${GITHUB_OUTPUT}"
+          echo "script=${GUARD_SCRIPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify PR Guard self-tests
+        shell: bash
+        env:
+          GUARD_SCRIPT: ${{ steps.guard_setup.outputs.script }}
+        run: python3 "${GUARD_SCRIPT}" --self-test
+
+      - name: Inspect pull request diff
+        shell: bash
+        env:
+          GUARD_SCRIPT: ${{ steps.guard_setup.outputs.script }}
+          DIFF_BASE: ${{ steps.guard_setup.outputs.diff_base }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork == true || github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          args=(--base "${DIFF_BASE}" --head HEAD)
+          if [ "${IS_FORK}" = "true" ]; then
+            args+=(--is-fork)
+          fi
+          python3 "${GUARD_SCRIPT}" "${args[@]}"
