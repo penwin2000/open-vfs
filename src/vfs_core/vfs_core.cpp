@@ -92,6 +92,17 @@ ContainerKind classify_extension(const std::filesystem::path& path) {
     return ContainerKind::Unknown;
 }
 
+// True when normalized `path` equals normalized `ancestor` or lies beneath it.
+bool is_same_or_descendant(std::string_view path, std::string_view ancestor) noexcept {
+    if (ancestor == "/") {
+        return true;
+    }
+    if (path.size() < ancestor.size() || path.compare(0, ancestor.size(), ancestor) != 0) {
+        return false;
+    }
+    return path.size() == ancestor.size() || path[ancestor.size()] == '/';
+}
+
 }  // namespace
 
 OPEN_VFS_IMPL
@@ -379,14 +390,42 @@ Status read_aligned_chunk(const VirtualStreamHandle& handle,
     return Status::NotImplemented;
 }
 
-OPEN_VFS_STUB
+OPEN_VFS_IMPL
 Status enumerate_mounted_entries(const MountRegistry& registry,
                                  std::string_view virtual_prefix,
                                  std::vector<std::string>& out_paths) {
-    (void)registry;
-    (void)virtual_prefix;
     out_paths.clear();
-    return Status::NotImplemented;
+
+    const std::string prefix = normalize_virtual_path(virtual_prefix);
+    bool prefix_covered = false;
+
+    for (const auto& mount : registry.mounts) {
+        const std::string mount_prefix = normalize_virtual_path(mount.virtual_prefix);
+        // The requested prefix is visible when it lies inside this mount or is an
+        // ancestor of it (e.g. listing "/" exposes every mount below the root).
+        if (!is_same_or_descendant(prefix, mount_prefix) &&
+            !is_same_or_descendant(mount_prefix, prefix)) {
+            continue;
+        }
+        prefix_covered = true;
+
+        for (const auto& archive : mount.discovered_archives) {
+            std::string entry_path = normalize_virtual_path(archive.virtual_root);
+            if (entry_path != prefix && is_same_or_descendant(entry_path, prefix)) {
+                out_paths.push_back(std::move(entry_path));
+            }
+        }
+    }
+
+    if (!prefix_covered) {
+        return Status::NotFound;
+    }
+
+    // Deterministic, duplicate-free listing even when overlapping mounts expose
+    // the same virtual path.
+    std::sort(out_paths.begin(), out_paths.end());
+    out_paths.erase(std::unique(out_paths.begin(), out_paths.end()), out_paths.end());
+    return Status::Ok;
 }
 
 }  // namespace open_vfs::vfs_core
