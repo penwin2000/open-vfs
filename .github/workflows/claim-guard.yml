@@ -1,0 +1,39 @@
+name: Claim Guard
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: "claim-guard-${{ github.repository }}"
+  cancel-in-progress: false
+
+jobs:
+  claim-guard:
+    name: Duplicate Claim Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Evaluate Claim-Key uniqueness
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS_JSON: ${{ toJson(github.event.issue.labels) }}
+          ISSUE_STATE: ${{ github.event.issue.state }}
+        run: python3 tools/claim_guard.py --check-issue

@@ -6,6 +6,8 @@ labels: []
 assignees: []
 ---
 
+Claim-Key: <module>::<symbol>
+
 ## Task Scope
 
 | Field | Value |

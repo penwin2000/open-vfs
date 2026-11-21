@@ -1,6 +1,7 @@
 ## Summary
 
 Closes #<issue_number>
+Claim-Key: <module>::<symbol>
 
 Brief plain-English description of the clean-room C++20 change in this pull request.
 

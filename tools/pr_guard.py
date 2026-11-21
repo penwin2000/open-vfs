@@ -8,6 +8,7 @@ without executing any code from the pull request itself.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -15,7 +16,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 MAX_ADDED_FILE_BYTES: int = 512 * 1024  # 512 KiB
 FULL_BLOB_INSPECT_LIMIT: int = 2 * 1024 * 1024  # 2 MiB
@@ -107,6 +108,26 @@ HUNK_HEADER_RE: re.Pattern[str] = re.compile(
     r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@"
 )
 
+CPP_SOURCE_EXTS: Set[str] = {".cpp", ".cc", ".cxx", ".hpp", ".h"}
+MACRO_TAG_RE: re.Pattern[str] = re.compile(r"\b(OPEN_VFS_IMPL|OPEN_VFS_STUB)\b")
+BLOCK_COMMENT_RE: re.Pattern[str] = re.compile(r"/\*.*?\*/", re.DOTALL)
+LINE_COMMENT_RE: re.Pattern[str] = re.compile(r"//[^\n]*")
+FUNC_NAME_BEFORE_PAREN_RE: re.Pattern[str] = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+CLAIM_KEY_RE: re.Pattern[str] = re.compile(
+    r"(?im)^\s*Claim-Key\s*:\s*([A-Za-z0-9_]+)::([A-Za-z_][A-Za-z0-9_]*)\s*$"
+)
+IMPLEMENT_TITLE_RE: re.Pattern[str] = re.compile(
+    r"^\s*\[([A-Za-z0-9_]+)\]\s*Implement\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+CONVENTIONAL_IMPLEMENT_RE: re.Pattern[str] = re.compile(
+    r"^\s*(?:feat|fix|chore|refactor|perf|test)\(([A-Za-z0-9_]+)\)\s*:\s*implement\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+QUALIFIED_SYMBOL_RE: re.Pattern[str] = re.compile(
+    r"\b([A-Za-z0-9_]+)::([A-Za-z_][A-Za-z0-9_]*)\b"
+)
+
 
 @dataclass
 class GuardReport:
@@ -120,6 +141,8 @@ class GuardReport:
     suspicious_api_errors: List[str] = field(default_factory=list)
     fork_control_files: List[str] = field(default_factory=list)
     test_coverage_errors: List[str] = field(default_factory=list)
+    overlapping_pr_errors: List[str] = field(default_factory=list)
+    overlapping_pr_notes: List[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -129,6 +152,7 @@ class GuardReport:
             or self.suspicious_api_errors
             or self.fork_control_files
             or self.test_coverage_errors
+            or self.overlapping_pr_errors
         )
 
 
@@ -379,12 +403,242 @@ def is_control_file(path: str) -> bool:
     return path.startswith(CONTROL_PATH_PREFIXES)
 
 
+def _strip_comments_preserve_lines(source: str) -> str:
+    def _blank_block(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    no_blocks = BLOCK_COMMENT_RE.sub(_blank_block, source)
+    return LINE_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), no_blocks)
+
+
+def _extract_symbol_name(clean_source: str, tag_end: int) -> str:
+    tail = clean_source[tag_end : tag_end + 400]
+    stripped = tail.lstrip()
+
+    if stripped.startswith("("):
+        explicit = re.match(r"\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)", stripped)
+        if explicit:
+            return explicit.group(1)
+
+    sig_end = len(tail)
+    for stop_ch in ("{", ";"):
+        idx = tail.find(stop_ch)
+        if idx != -1 and idx < sig_end:
+            sig_end = idx
+    sig = tail[:sig_end]
+
+    paren_idx = sig.find("(")
+    if paren_idx != -1:
+        before_paren = sig[: paren_idx + 1]
+        matches = list(FUNC_NAME_BEFORE_PAREN_RE.finditer(before_paren))
+        if matches:
+            return matches[-1].group(1)
+
+    return "unknown_symbol"
+
+
+def extract_symbol_statuses(source_text: str) -> Dict[str, str]:
+    """Return {symbol_name: 'impl' | 'stub'} parsed from C/C++ source text."""
+    clean_text = _strip_comments_preserve_lines(source_text)
+    statuses: Dict[str, str] = {}
+    for match in MACRO_TAG_RE.finditer(clean_text):
+        line_start = clean_text.rfind("\n", 0, match.start()) + 1
+        line_prefix = clean_text[line_start : match.start()].lstrip()
+        if line_prefix.startswith("#"):
+            continue
+        sym = _extract_symbol_name(clean_text, match.end())
+        if sym != "unknown_symbol":
+            statuses[sym] = "impl" if match.group(1) == "OPEN_VFS_IMPL" else "stub"
+    return statuses
+
+
+def _read_text_at_ref(repo_root: Path, ref: str, path: str) -> str:
+    proc = run_git(repo_root, ["show", f"{ref}:{path}"], check=False)
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def _module_from_src_path(path: str) -> Optional[str]:
+    parts = path.split("/")
+    if len(parts) < 3 or parts[0] != "src":
+        return None
+    if Path(path).suffix.lower() not in CPP_SOURCE_EXTS:
+        return None
+    return parts[1]
+
+
+def find_flipped_symbols(
+    repo_root: Path,
+    diff_base: str,
+    head_ref: str,
+    changed_files: Sequence[Tuple[str, str]],
+) -> Set[Tuple[str, str]]:
+    """Return {(module, symbol)} flipped from OPEN_VFS_STUB to OPEN_VFS_IMPL in this PR."""
+    flipped: Set[Tuple[str, str]] = set()
+    for status, path in changed_files:
+        if status == "D":
+            continue
+        module = _module_from_src_path(path)
+        if not module:
+            continue
+        before_statuses = extract_symbol_statuses(
+            _read_text_at_ref(repo_root, diff_base, path)
+        )
+        after_statuses = extract_symbol_statuses(
+            _read_text_at_ref(repo_root, head_ref, path)
+        )
+        for sym, after_state in after_statuses.items():
+            if before_statuses.get(sym) == "stub" and after_state == "impl":
+                flipped.add((module.lower(), sym))
+    return flipped
+
+
+def extract_flipped_symbols_from_patch(
+    path: str,
+    patch_text: str,
+) -> Set[Tuple[str, str]]:
+    """Detect OPEN_VFS_STUB -> OPEN_VFS_IMPL flips from a GitHub unified diff patch."""
+    module = _module_from_src_path(path)
+    if not module or not patch_text:
+        return set()
+
+    flipped: Set[Tuple[str, str]] = set()
+    before_lines: List[str] = []
+    after_lines: List[str] = []
+
+    def _flush_hunk() -> None:
+        if not before_lines and not after_lines:
+            return
+        before_statuses = extract_symbol_statuses("\n".join(before_lines))
+        after_statuses = extract_symbol_statuses("\n".join(after_lines))
+        for sym, after_state in after_statuses.items():
+            if before_statuses.get(sym) == "stub" and after_state == "impl":
+                flipped.add((module.lower(), sym))
+        before_lines.clear()
+        after_lines.clear()
+
+    for raw_line in patch_text.splitlines():
+        if raw_line.startswith("@@ "):
+            _flush_hunk()
+            continue
+        if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            after_lines.append(raw_line[1:])
+        elif raw_line.startswith("-") and not raw_line.startswith("---"):
+            before_lines.append(raw_line[1:])
+        elif raw_line.startswith(" "):
+            text = raw_line[1:]
+            before_lines.append(text)
+            after_lines.append(text)
+    _flush_hunk()
+    return flipped
+
+
+def _extract_pr_head_ref(pr_entry: Dict[str, Any]) -> str:
+    head_ref = pr_entry.get("headRefName")
+    if isinstance(head_ref, str) and head_ref:
+        return head_ref
+    head_obj = pr_entry.get("head")
+    if isinstance(head_obj, dict):
+        ref = head_obj.get("ref")
+        if isinstance(ref, str):
+            return ref
+    return ""
+
+
+def extract_pr_target_symbols(
+    pr_entry: Dict[str, Any],
+    candidate_targets: Set[Tuple[str, str]],
+) -> Set[Tuple[str, str]]:
+    """Extract {(module_lower, symbol)} targeted by another open PR."""
+    targets: Set[Tuple[str, str]] = set()
+    title = str(pr_entry.get("title") or "")
+    body = str(pr_entry.get("body") or "")
+    combined = f"{title}\n{body}"
+
+    for cm in CLAIM_KEY_RE.finditer(body):
+        targets.add((cm.group(1).lower(), cm.group(2)))
+
+    for pat in (IMPLEMENT_TITLE_RE, CONVENTIONAL_IMPLEMENT_RE):
+        im = pat.match(title)
+        if im:
+            targets.add((im.group(1).lower(), im.group(2)))
+
+    for qm in QUALIFIED_SYMBOL_RE.finditer(combined):
+        targets.add((qm.group(1).lower(), qm.group(2)))
+
+    head_ref = _extract_pr_head_ref(pr_entry).strip().lower().replace("_", "-")
+    if head_ref:
+        for mod_lower, sym in candidate_targets:
+            suffix = f"-{mod_lower.replace('_', '-')}-{sym.lower().replace('_', '-')}"
+            if head_ref.endswith(suffix):
+                targets.add((mod_lower, sym))
+
+    files = pr_entry.get("files") or []
+    if isinstance(files, list):
+        for file_entry in files:
+            if not isinstance(file_entry, dict):
+                continue
+            filename = str(file_entry.get("filename") or "")
+            patch = str(file_entry.get("patch") or "")
+            targets.update(extract_flipped_symbols_from_patch(filename, patch))
+
+    return targets
+
+
+def check_overlapping_prs(
+    current_targets: Set[Tuple[str, str]],
+    open_prs: Sequence[Dict[str, Any]],
+    *,
+    current_pr_number: int = 0,
+) -> Tuple[List[str], List[str]]:
+    """Return (errors, info_notes) when another open PR targets the same symbol."""
+    if not current_targets or not open_prs:
+        return [], []
+
+    errors: List[str] = []
+    notes: List[str] = []
+
+    sorted_prs = sorted(
+        (pr for pr in open_prs if isinstance(pr, dict)),
+        key=lambda pr: int(pr.get("number") or 0),
+    )
+
+    for mod_lower, sym in sorted(current_targets):
+        for other_pr in sorted_prs:
+            other_num = int(other_pr.get("number") or 0)
+            if current_pr_number > 0 and other_num == current_pr_number:
+                continue
+            other_targets = extract_pr_target_symbols(other_pr, current_targets)
+            if (mod_lower, sym) not in other_targets:
+                continue
+
+            other_title = str(other_pr.get("title") or "").strip()
+            if current_pr_number == 0 or (other_num > 0 and other_num < current_pr_number):
+                errors.append(
+                    f"{mod_lower}::{sym}: overlaps with earlier open PR #{other_num} "
+                    f"({other_title!r}). Coordinate on PR #{other_num} or pick another "
+                    "unclaimed OPEN_VFS_STUB via 'python tools/progress.py --pick --from-gh'."
+                )
+            else:
+                notes.append(
+                    f"{mod_lower}::{sym}: newer open PR #{other_num} ({other_title!r}) "
+                    f"also targets this symbol; PR #{other_num} is blocked in favor of "
+                    f"earlier PR #{current_pr_number}."
+                )
+
+    return errors, notes
+
+
 def run_guard(
     repo_root: Path,
     base_ref: str,
     head_ref: str,
     *,
     is_fork: bool,
+    open_prs: Sequence[Dict[str, Any]] = (),
+    current_pr_number: int = 0,
+    current_pr_body: str = "",
 ) -> GuardReport:
     diff_base = resolve_diff_base(repo_root, base_ref, head_ref)
     changed_files = get_changed_files(repo_root, diff_base, head_ref)
@@ -513,6 +767,22 @@ def run_guard(
             "tests/ (for example, tests/test_<module>.cpp) to verify your change."
         )
 
+    # Check 6: Overlapping open pull requests targeting the same OPEN_VFS_STUB symbol
+    if open_prs:
+        current_targets = find_flipped_symbols(
+            repo_root, diff_base, head_ref, changed_files
+        )
+        if current_pr_body:
+            for cm in CLAIM_KEY_RE.finditer(current_pr_body):
+                current_targets.add((cm.group(1).lower(), cm.group(2)))
+        overlap_errors, overlap_notes = check_overlapping_prs(
+            current_targets,
+            open_prs,
+            current_pr_number=current_pr_number,
+        )
+        report.overlapping_pr_errors.extend(overlap_errors)
+        report.overlapping_pr_notes.extend(overlap_notes)
+
     return report
 
 
@@ -571,6 +841,18 @@ def format_report(report: GuardReport) -> str:
             lines.append(f"  - {msg}")
         lines.append("")
 
+    if report.overlapping_pr_errors:
+        lines.append("[FAIL] 6. Overlapping open pull request(s) detected:")
+        for msg in report.overlapping_pr_errors:
+            lines.append(f"  - {msg}")
+        lines.append("")
+
+    if report.overlapping_pr_notes:
+        lines.append("[INFO] Overlapping newer pull request notice:")
+        for msg in report.overlapping_pr_notes:
+            lines.append(f"  - {msg}")
+        lines.append("")
+
     if report.passed:
         lines.append(
             "RESULT: PASS — All automated clean-room, safety, and coverage checks passed."
@@ -584,6 +866,7 @@ def format_report(report: GuardReport) -> str:
                 report.suspicious_api_errors,
                 report.fork_control_files,
                 report.test_coverage_errors,
+                report.overlapping_pr_errors,
             )
         )
         lines.append(
@@ -631,6 +914,9 @@ def _run_synthetic_case(
     *,
     pr_deletes: Sequence[str] = (),
     is_fork: bool = False,
+    open_prs: Sequence[Dict[str, Any]] = (),
+    current_pr_number: int = 0,
+    current_pr_body: str = "",
 ) -> GuardReport:
     with tempfile.TemporaryDirectory(prefix="open_vfs_pr_guard_test_") as tmp:
         repo = Path(tmp)
@@ -650,11 +936,19 @@ def _run_synthetic_case(
         _git_test_cmd(repo, ["add", "-A"])
         _git_test_cmd(repo, ["commit", "-m", "pr change"])
 
-        return run_guard(repo, "main", "HEAD", is_fork=is_fork)
+        return run_guard(
+            repo,
+            "main",
+            "HEAD",
+            is_fork=is_fork,
+            open_prs=open_prs,
+            current_pr_number=current_pr_number,
+            current_pr_body=current_pr_body,
+        )
 
 
 def run_self_tests() -> int:
-    """Run deterministic synthetic-diff self-checks covering all 5 guard rules."""
+    """Run deterministic synthetic-diff self-checks covering all 6 guard rules."""
     base_tree = {
         "README.md": b"# open-vfs\n",
         "AGENTS.md": b"# Agent Manual\n",
@@ -825,6 +1119,156 @@ def run_self_tests() -> int:
     )
     assert rep.passed, f"Expected docs-only PR to pass:\n{format_report(rep)}"
 
+    # 9. Overlapping open PR detection (fails check with plain-English error; no PR comments)
+    stub_base = dict(base_tree)
+    stub_base["src/rpf9/rpf9.cpp"] = (
+        b"OPEN_VFS_STUB\n"
+        b"int parse_rpf9_block_header() { return 0; }\n"
+        b"OPEN_VFS_STUB\n"
+        b"int decrypt_rpf9_payload() { return 0; }\n"
+    )
+    impl_writes = {
+        "src/rpf9/rpf9.cpp": (
+            b"OPEN_VFS_IMPL\n"
+            b"int parse_rpf9_block_header() { return 1; }\n"
+            b"OPEN_VFS_STUB\n"
+            b"int decrypt_rpf9_payload() { return 0; }\n"
+        ),
+        "tests/test_rpf9.cpp": b"int main() { return 0; }\n// test block header\n",
+    }
+
+    # 9a. Earlier open PR flipping the same symbol in its diff patch -> FAIL
+    earlier_patch_pr = [
+        {
+            "number": 10,
+            "title": "feat(rpf9): implement block header",
+            "body": "",
+            "headRefName": "feat/custom-branch",
+            "files": [
+                {
+                    "filename": "src/rpf9/rpf9.cpp",
+                    "patch": (
+                        "@@ -1,2 +1,2 @@\n"
+                        "-OPEN_VFS_STUB\n"
+                        "+OPEN_VFS_IMPL\n"
+                        " int parse_rpf9_block_header() { return 1; }\n"
+                    ),
+                }
+            ],
+        }
+    ]
+    rep = _run_synthetic_case(
+        stub_base,
+        impl_writes,
+        open_prs=earlier_patch_pr,
+        current_pr_number=20,
+    )
+    assert not rep.passed and rep.overlapping_pr_errors, (
+        "Expected overlapping earlier patch PR to fail PR Guard"
+    )
+    assert "#10" in rep.overlapping_pr_errors[0]
+    assert "rpf9::parse_rpf9_block_header" in rep.overlapping_pr_errors[0]
+
+    # 9b. Earlier open PR claiming the same symbol via Claim-Key -> FAIL
+    earlier_claim_pr = [
+        {
+            "number": 11,
+            "title": "work in progress",
+            "body": "Claim-Key: rpf9::parse_rpf9_block_header\n",
+            "headRefName": "wip/block-hdr",
+            "files": [],
+        }
+    ]
+    rep = _run_synthetic_case(
+        stub_base,
+        impl_writes,
+        open_prs=earlier_claim_pr,
+        current_pr_number=20,
+    )
+    assert not rep.passed and rep.overlapping_pr_errors, (
+        "Expected overlapping earlier Claim-Key PR to fail PR Guard"
+    )
+    assert "#11" in rep.overlapping_pr_errors[0]
+
+    # 9c. Earlier open PR matching via branch hint -> FAIL
+    earlier_branch_pr = [
+        {
+            "number": 12,
+            "title": "wip",
+            "body": "",
+            "headRefName": "feat/m1-rpf9-parse-rpf9-block-header",
+            "files": [],
+        }
+    ]
+    rep = _run_synthetic_case(
+        stub_base,
+        impl_writes,
+        open_prs=earlier_branch_pr,
+        current_pr_number=20,
+    )
+    assert not rep.passed and rep.overlapping_pr_errors, (
+        "Expected overlapping earlier branch-hint PR to fail PR Guard"
+    )
+
+    # 9d. Newer open PR (#30 > #20) overlaps -> earlier PR #20 stays PASS with info note
+    newer_pr = [
+        {
+            "number": 30,
+            "title": "feat(rpf9): implement parse_rpf9_block_header",
+            "body": "Claim-Key: rpf9::parse_rpf9_block_header\n",
+            "headRefName": "feat/m1-rpf9-parse-rpf9-block-header",
+            "files": [],
+        }
+    ]
+    rep = _run_synthetic_case(
+        stub_base,
+        impl_writes,
+        open_prs=newer_pr,
+        current_pr_number=20,
+    )
+    assert rep.passed, f"Expected earlier PR #20 to stay passing:\n{format_report(rep)}"
+    assert rep.overlapping_pr_notes, "Expected informational notice for newer duplicate PR"
+
+    # 9e. Same PR number (#20 == #20) is ignored -> PASS
+    self_pr = [
+        {
+            "number": 20,
+            "title": "feat(rpf9): implement parse_rpf9_block_header",
+            "body": "Claim-Key: rpf9::parse_rpf9_block_header\n",
+            "headRefName": "feat/m1-rpf9-parse-rpf9-block-header",
+            "files": [],
+        }
+    ]
+    rep = _run_synthetic_case(
+        stub_base,
+        impl_writes,
+        open_prs=self_pr,
+        current_pr_number=20,
+    )
+    assert rep.passed and not rep.overlapping_pr_notes, (
+        f"Expected self PR entry to be ignored:\n{format_report(rep)}"
+    )
+
+    # 9f. Earlier open PR targeting a DIFFERENT symbol in the same module -> PASS
+    other_sym_pr = [
+        {
+            "number": 10,
+            "title": "feat(rpf9): implement decrypt_rpf9_payload",
+            "body": "Claim-Key: rpf9::decrypt_rpf9_payload\n",
+            "headRefName": "feat/m1-rpf9-decrypt-rpf9-payload",
+            "files": [],
+        }
+    ]
+    rep = _run_synthetic_case(
+        stub_base,
+        impl_writes,
+        open_prs=other_sym_pr,
+        current_pr_number=20,
+    )
+    assert rep.passed, (
+        f"Expected distinct symbol in same module to pass:\n{format_report(rep)}"
+    )
+
     print("PR Guard self-test passed: all synthetic diff checks verified.")
     return 0
 
@@ -856,6 +1300,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Enable strict external-fork control-file audit guard.",
     )
     parser.add_argument(
+        "--open-prs-json",
+        type=Path,
+        default=None,
+        help="Optional path to JSON array of open PRs for overlapping-symbol detection.",
+    )
+    parser.add_argument(
+        "--pr-number",
+        type=int,
+        default=0,
+        help="Current pull request number (0 when running locally).",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         default=False,
@@ -869,6 +1325,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.self_test:
         return run_self_tests()
 
+    open_prs: List[Dict[str, Any]] = []
+    if args.open_prs_json is not None:
+        try:
+            raw = args.open_prs_json.read_text(encoding="utf-8")
+            parsed = json.loads(raw or "[]")
+            if not isinstance(parsed, list):
+                raise ValueError("--open-prs-json must contain a JSON array")
+            open_prs = parsed
+        except (OSError, ValueError) as exc:
+            print(f"PR Guard error reading --open-prs-json: {exc}", file=sys.stderr)
+            return 2
+
+    current_pr_body = os.environ.get("OPEN_VFS_PR_BODY", "")
     repo_root = args.repo_root.resolve()
     try:
         report = run_guard(
@@ -876,6 +1345,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.base,
             args.head,
             is_fork=args.is_fork,
+            open_prs=open_prs,
+            current_pr_number=args.pr_number,
+            current_pr_body=current_pr_body,
         )
     except RuntimeError as exc:
         print(f"PR Guard error: {exc}", file=sys.stderr)
