@@ -1,6 +1,7 @@
 #include "rds5.hpp"
 
 #include <limits>
+#include <utility>
 #include <open_vfs/macros.hpp>
 #include "../vfs_core/vfs_core.hpp"
 
@@ -233,9 +234,9 @@ Status parse_etpf_header(std::span<const uint8_t> chunk0_data,
     const auto magic = vfs_core::read_u32_le(chunk0_data, 0);
     const auto version = vfs_core::read_u32_le(chunk0_data, 4);
     const auto entry_count = vfs_core::read_u32_le(chunk0_data, 8);
-    const auto secondary_offset = vfs_core::read_u32_le(chunk0_data, 12);
+    const auto aux_pool_size = vfs_core::read_u32_le(chunk0_data, 12);
 
-    if (!magic || !version || !entry_count || !secondary_offset) {
+    if (!magic || !version || !entry_count || !aux_pool_size) {
         return Status::OutOfBounds;
     }
     if (*magic != kEtpfMagic) {
@@ -244,32 +245,191 @@ Status parse_etpf_header(std::span<const uint8_t> chunk0_data,
     if (*version != kEtpfVersion) {
         return Status::UnsupportedFormat;
     }
+    if ((*aux_pool_size % static_cast<uint32_t>(kEtpfAuxPoolAlignment)) != 0u) {
+        return Status::AlignmentError;
+    }
 
     constexpr uint64_t kHeaderSize = static_cast<uint64_t>(kEtpfHeaderSize);
-    constexpr uint64_t kEntrySize = static_cast<uint64_t>(kEtpfDescriptorSize);
+    constexpr uint64_t kPerEntrySize = static_cast<uint64_t>(kEtpfTotalBytesPerEntry);
     const uint64_t count64 = static_cast<uint64_t>(*entry_count);
-    if (count64 > (std::numeric_limits<uint64_t>::max() - kHeaderSize) / kEntrySize) {
+    const uint64_t aux64 = static_cast<uint64_t>(*aux_pool_size);
+
+    if (count64 > (std::numeric_limits<uint64_t>::max() - kHeaderSize) / kPerEntrySize) {
+        return Status::OutOfBounds;
+    }
+    const uint64_t fixed_regions_end = kHeaderSize + (count64 * kPerEntrySize);
+    if (aux64 > (std::numeric_limits<uint64_t>::max() - fixed_regions_end)) {
         return Status::OutOfBounds;
     }
 
-    const uint64_t primary_table_end = kHeaderSize + (count64 * kEntrySize);
+    const uint64_t total_span = fixed_regions_end + aux64;
     const uint64_t chunk_size = static_cast<uint64_t>(chunk0_data.size());
-    if (primary_table_end > chunk_size) {
+    if (total_span > chunk_size) {
         return Status::OutOfBounds;
-    }
-
-    const uint64_t secondary64 = static_cast<uint64_t>(*secondary_offset);
-    if (secondary64 > chunk_size) {
-        return Status::OutOfBounds;
-    }
-    if (secondary64 < primary_table_end) {
-        return Status::CorruptData;
     }
 
     out_header.magic = *magic;
     out_header.version = *version;
     out_header.entry_count = *entry_count;
-    out_header.secondary_table_offset = *secondary_offset;
+    out_header.aux_pool_size = *aux_pool_size;
+    return Status::Ok;
+}
+
+OPEN_VFS_IMPL
+std::optional<uint32_t> lookup_etpf_chunk_size_pages(uint8_t code) noexcept {
+    // Verified 5-bit ETPF chunk_size_codes table (units of 4 KiB pages; bytes = pages * 4096).
+    // Code 0 represents an absent/empty slot (0 pages). Unobserved codes return std::nullopt.
+    // RDS5 chunk descriptors remain authoritative for exact per-chunk uncompressed_size.
+    switch (code) {
+        case 0u:  return 0u;    // Absent / empty slot
+        case 1u:  return 1u;    //    4 KiB
+        case 2u:  return 2u;    //    8 KiB
+        case 3u:  return 3u;    //   12 KiB
+        case 4u:  return 4u;    //   16 KiB
+        case 5u:  return 5u;    //   20 KiB
+        case 6u:  return 6u;    //   24 KiB
+        case 7u:  return 7u;    //   28 KiB
+        case 8u:  return 8u;    //   32 KiB
+        case 10u: return 12u;   //   48 KiB
+        case 11u: return 16u;   //   64 KiB
+        case 12u: return 24u;   //   96 KiB
+        case 13u: return 32u;   //  128 KiB
+        case 14u: return 48u;   //  192 KiB
+        case 15u: return 64u;   //  256 KiB
+        case 16u: return 128u;  //  512 KiB
+        case 21u: return 18u;   //   72 KiB
+        case 22u: return 80u;   //  320 KiB
+        case 23u: return 96u;   //  384 KiB
+        case 24u: return 144u;  //  576 KiB
+        case 26u: return 272u;  // 1088 KiB
+        case 27u: return 384u;  // 1536 KiB
+        case 28u: return 528u;  // 2112 KiB
+        default:  return std::nullopt;  // Unobserved (9, 17..20, 25, 29..31) or > 31
+    }
+}
+
+OPEN_VFS_IMPL
+Status parse_etpf_texture_descriptor(std::span<const uint8_t> data,
+                                     EtpfTextureDescriptor& out_descriptor) noexcept {
+    if (data.size() < kEtpfDescriptorSize) {
+        return Status::OutOfBounds;
+    }
+
+    const auto w0 = vfs_core::read_u32_le(data, 0);
+    const auto w1 = vfs_core::read_u32_le(data, 4);
+    const auto q23 = vfs_core::read_u64_le(data, 8);
+    if (!w0 || !w1 || !q23) {
+        return Status::OutOfBounds;
+    }
+
+    const uint8_t dimension_flags = static_cast<uint8_t>((*w1 >> 21u) & 0x07u);
+    if (!is_valid_etpf_dimension(dimension_flags)) {
+        return Status::UnsupportedFormat;
+    }
+
+    EtpfTextureDescriptor parsed{};
+    parsed.raw_w0 = *w0;
+    parsed.raw_w1 = *w1;
+    parsed.raw_q23 = *q23;
+
+    parsed.width = static_cast<uint16_t>((*w0 & 0x3FFFu) + 1u);
+    parsed.height = static_cast<uint16_t>(((*w0 >> 14u) & 0x3FFFu) + 1u);
+    parsed.tail_mip_count = static_cast<uint8_t>((*w0 >> 28u) & 0x0Fu);
+
+    parsed.streamed_mip_count = static_cast<uint8_t>(*w1 & 0x07u);
+    parsed.dxgi_format = static_cast<uint8_t>((*w1 >> 3u) & 0x7Fu);
+    parsed.depth_or_slices = static_cast<uint8_t>(((*w1 >> 10u) & 0x3Fu) + 1u);
+    parsed.dimension_flags = dimension_flags;
+    parsed.packed_tier_count = static_cast<uint8_t>((*w1 >> 24u) & 0x07u);
+    parsed.is_cube_tile_flag = ((*w1 >> 27u) & 0x01u) != 0u;
+    parsed.aux_flag_10 = ((*w1 >> 28u) & 0x01u) != 0u;
+
+    parsed.virt_page = static_cast<uint32_t>(*q23 & 0x1FFFFFull);
+    parsed.chunk_size_codes = {
+        static_cast<uint8_t>((*q23 >> 21u) & 0x1Full),
+        static_cast<uint8_t>((*q23 >> 26u) & 0x1Full),
+        static_cast<uint8_t>((*q23 >> 31u) & 0x1Full),
+        static_cast<uint8_t>((*q23 >> 36u) & 0x1Full),
+    };
+    parsed.sub64k_chunk_count = static_cast<uint8_t>((*q23 >> 51u) & 0x03ull);
+    parsed.tile0_free_pages = static_cast<uint8_t>((*q23 >> 53u) & 0x0Full);
+
+    out_descriptor = parsed;
+    return Status::Ok;
+}
+
+OPEN_VFS_IMPL
+Status parse_etpf_table(std::span<const uint8_t> chunk0_data,
+                        EtpfTable& out_table) {
+    out_table = EtpfTable{};
+
+    EtpfHeader header{};
+    const Status header_status = parse_etpf_header(chunk0_data, header);
+    if (header_status != Status::Ok) {
+        return header_status;
+    }
+
+    const std::size_t entry_count = static_cast<std::size_t>(header.entry_count);
+    const std::size_t descriptors_offset = static_cast<std::size_t>(header.descriptors_offset());
+    const std::size_t keys_offset = static_cast<std::size_t>(header.keys_offset());
+    const std::size_t secondary_offset = static_cast<std::size_t>(header.secondary_offset());
+    const std::size_t aux_pool_offset = static_cast<std::size_t>(header.aux_pool_offset());
+    const std::size_t aux_pool_size = static_cast<std::size_t>(header.aux_pool_size);
+
+    EtpfTable parsed{};
+    parsed.header = header;
+    parsed.descriptors.reserve(entry_count);
+    parsed.resource_keys.reserve(entry_count);
+    parsed.secondary_entries.reserve(entry_count);
+
+    // 1. Primary 16-byte GPU texture descriptors [+0x10, +0x10 + 16*N), monotonic by virt_page
+    std::size_t cursor = descriptors_offset;
+    for (std::size_t i = 0; i < entry_count; ++i) {
+        EtpfTextureDescriptor desc{};
+        const Status desc_status = parse_etpf_texture_descriptor(
+            chunk0_data.subspan(cursor, kEtpfDescriptorSize), desc);
+        if (desc_status != Status::Ok) {
+            return desc_status;
+        }
+        if (i > 0u && desc.virt_page < parsed.descriptors.back().virt_page) {
+            return Status::CorruptData;
+        }
+        parsed.descriptors.push_back(desc);
+        cursor += kEtpfDescriptorSize;
+    }
+
+    // 2. Strictly ascending u64 resource keys [+0x10 + 16*N, +0x10 + 24*N)
+    cursor = keys_offset;
+    for (std::size_t i = 0; i < entry_count; ++i) {
+        const auto key = vfs_core::read_u64_le(chunk0_data, cursor);
+        if (!key.has_value()) {
+            return Status::OutOfBounds;
+        }
+        if (i > 0u && *key <= parsed.resource_keys.back()) {
+            return Status::CorruptData;
+        }
+        parsed.resource_keys.push_back(*key);
+        cursor += kEtpfKeySize;
+    }
+
+    // 3. Opaque / high-entropy secondary 8-byte/entry region [+0x10 + 24*N, +0x10 + 32*N)
+    cursor = secondary_offset;
+    for (std::size_t i = 0; i < entry_count; ++i) {
+        const auto entry = vfs_core::read_u64_le(chunk0_data, cursor);
+        if (!entry.has_value()) {
+            return Status::OutOfBounds;
+        }
+        parsed.secondary_entries.push_back(*entry);
+        cursor += kEtpfSecondaryEntrySize;
+    }
+
+    // 4. 16-byte-aligned trailing auxiliary pool [+0x10 + 32*N, +0x10 + 32*N + S_aux)
+    if (aux_pool_size > 0u) {
+        const auto aux_slice = chunk0_data.subspan(aux_pool_offset, aux_pool_size);
+        parsed.aux_pool.assign(aux_slice.begin(), aux_slice.end());
+    }
+
+    out_table = std::move(parsed);
     return Status::Ok;
 }
 
