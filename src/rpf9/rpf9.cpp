@@ -8,7 +8,7 @@ namespace open_vfs::rpf9 {
 
 OPEN_VFS_IMPL
 bool validate_rpf9_magic(uint32_t raw_magic) noexcept {
-    return raw_magic == kRpf9Magic || raw_magic == kRpf9MagicAsciiLe;
+    return raw_magic == kRpf9Magic;
 }
 
 OPEN_VFS_IMPL
@@ -17,29 +17,235 @@ Status parse_rpf9_header(std::span<const uint8_t> data, Rpf9Header& out_header) 
         return Status::OutOfBounds;
     }
 
-    const auto magic = vfs_core::read_u32_le(data, 0);
-    const auto entry_count = vfs_core::read_u32_le(data, 4);
-    const auto names_length = vfs_core::read_u32_le(data, 8);
-    const auto encryption_flags = vfs_core::read_u32_le(data, 12);
-    const auto toc_offset = vfs_core::read_u64_le(data, 16);
-    const auto names_offset = vfs_core::read_u64_le(data, 24);
+    const auto magic = vfs_core::read_u32_le(data, 0x00);
+    const auto metadata_end_offset = vfs_core::read_u32_le(data, 0x04);
+    const auto region_b_offset = vfs_core::read_u32_le(data, 0x08);
+    const auto tail_table_size = vfs_core::read_u32_le(data, 0x0C);
+    const auto archive_seed = vfs_core::read_u64_le(data, 0x10);
+    const auto format_constant = vfs_core::read_u32_le(data, 0x18);
+    const auto region_a_offset = vfs_core::read_u32_le(data, 0x1C);
+    const auto archive_flags = vfs_core::read_u16_le(data, 0x20);
+    const auto region_b_mode = vfs_core::read_u16_le(data, 0x22);
+    const auto entry_count = vfs_core::read_u32_le(data, 0x24);
+    const auto key_profile_tag = vfs_core::read_u32_le(data, 0x28);
+    const auto alignment = vfs_core::read_u32_le(data, 0x30);
 
-    if (!magic || !entry_count || !names_length || !encryption_flags || !toc_offset || !names_offset) {
+    if (!magic || !metadata_end_offset || !region_b_offset || !tail_table_size ||
+        !archive_seed || !format_constant || !region_a_offset || !archive_flags ||
+        !region_b_mode || !entry_count || !key_profile_tag || !alignment) {
         return Status::OutOfBounds;
     }
+
     if (!validate_rpf9_magic(*magic)) {
         return Status::InvalidMagic;
     }
-    if (!vfs_core::is_aligned_16(*toc_offset) || !vfs_core::is_aligned_16(*names_offset)) {
+
+    if (!vfs_core::is_aligned_16(*metadata_end_offset) ||
+        !vfs_core::is_aligned_16(*region_b_offset) ||
+        !vfs_core::is_aligned_16(*tail_table_size) ||
+        *alignment != kRpf9HeaderAlignment) {
         return Status::AlignmentError;
     }
 
+    if (*format_constant != kRpf9FormatConstant) {
+        return Status::UnsupportedFormat;
+    }
+
+    if (*region_a_offset != kRpf9RegionAOffset) {
+        return Status::CorruptData;
+    }
+
+    if (*region_b_mode != kRpf9RegionBModeCompact &&
+        *region_b_mode != kRpf9RegionBModeExtended) {
+        return Status::UnsupportedFormat;
+    }
+
+    const uint8_t index_width = data[0x2C];
+    const uint8_t byte_2d = data[0x2D];
+    const uint8_t byte_2e = data[0x2E];
+    const uint8_t byte_2f = data[0x2F];
+
+    if (index_width != expected_rpf9_index_width(*entry_count)) {
+        return Status::CorruptData;
+    }
+
+    if (byte_2d != kRpf9HeaderByte2D ||
+        byte_2e != kRpf9HeaderByte2E ||
+        byte_2f != kRpf9HeaderByte2F) {
+        return Status::UnsupportedFormat;
+    }
+
+    for (std::size_t i = 0; i < kRpf9ReservedPaddingSize; ++i) {
+        if (data[kRpf9ReservedPaddingOffset + i] != 0u) {
+            return Status::CorruptData;
+        }
+    }
+
     out_header.magic = *magic;
+    out_header.metadata_end_offset = *metadata_end_offset;
+    out_header.region_b_offset = *region_b_offset;
+    out_header.tail_table_size = *tail_table_size;
+    out_header.archive_seed = *archive_seed;
+    out_header.format_constant = *format_constant;
+    out_header.region_a_offset = *region_a_offset;
+    out_header.archive_flags = *archive_flags;
+    out_header.region_b_mode = *region_b_mode;
     out_header.entry_count = *entry_count;
-    out_header.names_length = *names_length;
-    out_header.encryption_flags = *encryption_flags;
-    out_header.toc_offset = *toc_offset;
-    out_header.names_offset = *names_offset;
+    out_header.key_profile_tag = *key_profile_tag;
+    out_header.index_width = index_width;
+    out_header.header_byte_2d = byte_2d;
+    out_header.header_byte_2e = byte_2e;
+    out_header.header_byte_2f = byte_2f;
+    out_header.alignment = *alignment;
+    return Status::Ok;
+}
+
+OPEN_VFS_IMPL
+Status validate_rpf9_regions(const Rpf9Header& header,
+                             uint64_t file_size,
+                             Rpf9RegionLayout& out_layout) noexcept {
+    out_layout = Rpf9RegionLayout{};
+
+    if (!validate_rpf9_magic(header.magic)) {
+        return Status::InvalidMagic;
+    }
+
+    if (!vfs_core::is_aligned_16(header.metadata_end_offset) ||
+        !vfs_core::is_aligned_16(header.region_b_offset) ||
+        !vfs_core::is_aligned_16(header.tail_table_size) ||
+        header.alignment != kRpf9HeaderAlignment) {
+        return Status::AlignmentError;
+    }
+
+    if (header.format_constant != kRpf9FormatConstant) {
+        return Status::UnsupportedFormat;
+    }
+
+    if (header.region_a_offset != kRpf9RegionAOffset) {
+        return Status::CorruptData;
+    }
+
+    if (header.region_b_mode != kRpf9RegionBModeCompact &&
+        header.region_b_mode != kRpf9RegionBModeExtended) {
+        return Status::UnsupportedFormat;
+    }
+
+    if (header.index_width != expected_rpf9_index_width(header.entry_count)) {
+        return Status::CorruptData;
+    }
+
+    const uint64_t region_a_start = static_cast<uint64_t>(header.region_a_offset);
+    const uint64_t region_b_start = static_cast<uint64_t>(header.region_b_offset);
+    const uint64_t metadata_end = static_cast<uint64_t>(header.metadata_end_offset);
+    const uint64_t tail_size = static_cast<uint64_t>(header.tail_table_size);
+
+    if (region_b_start < region_a_start || metadata_end < region_b_start) {
+        return Status::CorruptData;
+    }
+
+    if (tail_size > file_size) {
+        return Status::OutOfBounds;
+    }
+
+    const uint64_t payload_end = file_size - tail_size;
+    if (metadata_end > payload_end) {
+        return Status::OutOfBounds;
+    }
+
+    const uint64_t region_b_size = metadata_end - region_b_start;
+    if (header.region_b_mode == kRpf9RegionBModeCompact) {
+        const uint64_t expected_b_size =
+            expected_rpf9_region_b_size(header.entry_count, header.index_width);
+        if (region_b_size != expected_b_size) {
+            return Status::CorruptData;
+        }
+    }
+
+    out_layout.crypto_block = Rpf9ByteRange{
+        static_cast<uint64_t>(kRpf9CryptoBlockOffset),
+        static_cast<uint64_t>(kRpf9CryptoBlockSize),
+    };
+    out_layout.region_a = Rpf9ByteRange{
+        region_a_start,
+        region_b_start - region_a_start,
+    };
+    out_layout.region_b = Rpf9ByteRange{
+        region_b_start,
+        region_b_size,
+    };
+    out_layout.payload = Rpf9ByteRange{
+        metadata_end,
+        payload_end - metadata_end,
+    };
+    out_layout.region_c = Rpf9ByteRange{
+        payload_end,
+        tail_size,
+    };
+    return Status::Ok;
+}
+
+OPEN_VFS_IMPL
+Status scan_rpf9_plaintext_payloads(std::span<const uint8_t> archive_bytes,
+                                    const Rpf9Header& header,
+                                    std::vector<Rpf9PlaintextPayloadHit>& out_hits) {
+    out_hits.clear();
+
+    Rpf9RegionLayout regions{};
+    const Status region_status =
+        validate_rpf9_regions(header, static_cast<uint64_t>(archive_bytes.size()), regions);
+    if (region_status != Status::Ok) {
+        return region_status;
+    }
+
+    const std::size_t payload_start = static_cast<std::size_t>(regions.payload.offset);
+    const std::size_t payload_end = static_cast<std::size_t>(regions.payload.end_offset());
+    constexpr std::size_t kPageAlign = static_cast<std::size_t>(kRpf9PageAlignment);
+    constexpr std::size_t kStreamAlign = static_cast<std::size_t>(kRpf9StreamAlignment);
+
+    for (std::size_t off = payload_start; off < payload_end;) {
+        const std::size_t remaining = payload_end - off;
+        bool matched = false;
+
+        if ((off & (kPageAlign - 1u)) == 0u && remaining >= 4u) {
+            const auto magic = vfs_core::read_u32_le(archive_bytes, off);
+            if (magic.has_value()) {
+                if (*magic == kRpf9Magic) {
+                    out_hits.push_back(Rpf9PlaintextPayloadHit{
+                        static_cast<uint64_t>(off),
+                        Rpf9PlaintextKind::NestedRpf9,
+                    });
+                    matched = true;
+                } else if (*magic == kSgd5Magic) {
+                    out_hits.push_back(Rpf9PlaintextPayloadHit{
+                        static_cast<uint64_t>(off),
+                        Rpf9PlaintextKind::Sgd5,
+                    });
+                    matched = true;
+                } else if (*magic == kAdatMagic) {
+                    out_hits.push_back(Rpf9PlaintextPayloadHit{
+                        static_cast<uint64_t>(off),
+                        Rpf9PlaintextKind::Adat,
+                    });
+                    matched = true;
+                }
+            }
+        }
+
+        if (!matched && remaining >= 2u &&
+            archive_bytes[off] == kZlibBestCompressionCmf &&
+            archive_bytes[off + 1u] == kZlibBestCompressionFlg) {
+            out_hits.push_back(Rpf9PlaintextPayloadHit{
+                static_cast<uint64_t>(off),
+                Rpf9PlaintextKind::Zlib78Da,
+            });
+        }
+
+        if (remaining <= kStreamAlign) {
+            break;
+        }
+        off += kStreamAlign;
+    }
+
     return Status::Ok;
 }
 
@@ -75,12 +281,13 @@ Status parse_rpf9_toc_table(std::span<const uint8_t> archive_bytes,
     if (!validate_rpf9_magic(header.magic)) {
         return Status::InvalidMagic;
     }
-    if (!vfs_core::is_aligned_16(header.toc_offset)) {
+    if (!vfs_core::is_aligned_16(header.region_a_offset)) {
         return Status::AlignmentError;
     }
 
     const uint64_t archive_size = static_cast<uint64_t>(archive_bytes.size());
-    if (header.toc_offset > archive_size) {
+    const uint64_t table_offset = static_cast<uint64_t>(header.region_a_offset);
+    if (table_offset > archive_size) {
         return Status::OutOfBounds;
     }
 
@@ -91,12 +298,12 @@ Status parse_rpf9_toc_table(std::span<const uint8_t> archive_bytes,
     }
 
     const uint64_t table_size = entry_count * kEntrySize;
-    if (table_size > archive_size - header.toc_offset) {
+    if (table_size > archive_size - table_offset) {
         return Status::OutOfBounds;
     }
 
     out_entries.reserve(static_cast<std::size_t>(entry_count));
-    std::size_t cursor = static_cast<std::size_t>(header.toc_offset);
+    std::size_t cursor = static_cast<std::size_t>(table_offset);
     for (uint32_t i = 0; i < header.entry_count; ++i) {
         Rpf9TocEntry entry{};
         const Status status = parse_rpf9_toc_entry(
