@@ -563,7 +563,8 @@ def run_self_tests() -> int:
     # 4. Editing #51 after its own PR #60 (Closes #51) is opened must NOT close #51.
     assert evaluate_claim_issue(stale_with_pr, open_issues, open_prs) is None
 
-    # 5. A new claim #65 colliding with existing open PR #60 closes pointing to PR #60.
+    # 5. A new claim #65 colliding with existing open PR #60 (with no earlier open issue)
+    # closes pointing to PR #60; if earlier open issue #51 is also present, #51 wins first.
     claim_vs_pr = {
         "number": 65,
         "title": "[rds5] Implement decompress_rds5_chunk",
@@ -572,8 +573,20 @@ def run_self_tests() -> int:
         "labels": [],
         "updated_at": fresh_ts,
     }
-    dup_pr = evaluate_claim_issue(claim_vs_pr, open_issues, open_prs)
-    assert dup_pr is not None and dup_pr["winner_type"] == "pr" and dup_pr["winner_number"] == 60, dup_pr
+    dup_issue_first = evaluate_claim_issue(claim_vs_pr, open_issues, open_prs)
+    assert (
+        dup_issue_first is not None
+        and dup_issue_first["winner_type"] == "issue"
+        and dup_issue_first["winner_number"] == 51
+    ), dup_issue_first
+
+    issues_without_51 = [iss for iss in open_issues if iss["number"] != 51]
+    dup_pr = evaluate_claim_issue(claim_vs_pr, issues_without_51, open_prs)
+    assert (
+        dup_pr is not None
+        and dup_pr["winner_type"] == "pr"
+        and dup_pr["winner_number"] == 60
+    ), dup_pr
 
     # 6. Stale reaper ONLY returns #50 (old Claim-Key with no PR).
     # Starter issues (#13, #18), non-Claim-Key (#25), fresh (#42, #43), and PR-backed (#51) are skipped.
