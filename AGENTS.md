@@ -2,7 +2,7 @@
 
 This repository builds **`open-vfs.exe`**, a clean-room **C++20** and **DirectX 12** native Windows 11 desktop runtime for user-supplied local console archive directories.
 
-When a contributor opens their local data directory in any AI coding harness (such as Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) and says:
+When a contributor opens any AI coding harness (such as Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) and says:
 
 > `Set up https://github.com/penwin2000/open-vfs and start contributing`
 
@@ -23,10 +23,19 @@ follow the automated **Pick -> Claim & Verify -> Branch -> PR** workflow below (
 
 ## Automated Contributor Workflow
 
-Execute these 8 steps in order:
+Execute these steps in order, starting with Step 0:
+
+### 0. Ask the User for Their Local Game Data Folder (Always)
+Before cloning, picking a stub, or running any other command, **always ask the user in chat** for the absolute path to their local game data folder (the folder holding their own archive files), then **wait for their answer**.
+- Ask even when the current working directory already looks like a data folder. In that case, offer it as the suggested answer, but still wait for the user to confirm it.
+- Never search the disk for archives, guess the location, or infer it from other folders, recent files, or harness history.
+- Once the user answers, confirm read-only that the path exists and is a directory. Count the container files by extension (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`, `*.pri`) and report the counts to the user. If the folder is missing or holds no container files, say so and ask again.
+- If the user says they have no game folder or would rather not share it, continue in **no-data mode**: skip Step 5 and pick only stubs outside `rpf9`, `rds5`, and `xvd`, whose parsers require header inspection.
+- The confirmed path (`<data_dir>`) is local-only knowledge. Never write it, or any file name inside it, into the repository, a commit, an issue, or a pull request.
 
 ### 1. Bootstrap `.open-vfs-repo/` & Detect Permissions
-- If `.open-vfs-repo/.git` does not exist in the workspace, clone `https://github.com/penwin2000/open-vfs.git` into `.open-vfs-repo/`.
+- Use `<data_dir>/.open-vfs-repo/` as the repository folder (in no-data mode, use `.open-vfs-repo/` in the current workspace).
+- If `.open-vfs-repo/.git` does not exist there, clone `https://github.com/penwin2000/open-vfs.git` into it.
 - Otherwise, `git -C .open-vfs-repo checkout main` and `git -C .open-vfs-repo pull --ff-only origin main`.
 - Run all subsequent repository commands with `.open-vfs-repo/` as the working directory.
 - Verify GitHub CLI authentication and check repository permissions:
@@ -94,7 +103,7 @@ git checkout -b feat/m<num>-<module>-<symbol>
 ```
 
 ### 5. Read-Only Local Header Inspection (When Applicable)
-For container parsers (`vfs_core`, `rpf9`, `rds5`, `xvd`) or asset decoders (`render`, `audio`, `world_vm`), inspect matching archive headers (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`) in the parent local data folder **read-only** first to validate magic values (`0x52504639`, `0x52445335`, `0x1DD3014E` / `"msft-xvd"` at offset `0x000` or `0x200`), struct field widths, endianness, flags, and 16-byte alignment constraints. Never write into the parent workspace or copy bytes or local filenames into `.open-vfs-repo/`.
+For container parsers (`vfs_core`, `rpf9`, `rds5`, `xvd`) or asset decoders (`render`, `audio`, `world_vm`), inspect matching archive headers (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`) in the user-confirmed `<data_dir>` from Step 0 **read-only** first (skip this step in no-data mode) to validate magic values (`0x52504639`, `0x52445335`, `0x1DD3014E` / `"msft-xvd"` at offset `0x000` or `0x200`), struct field widths, endianness, flags, and 16-byte alignment constraints. Never write into the parent workspace or copy bytes or local filenames into `.open-vfs-repo/`.
 
 ### 6. Implement Clean-Room C++20 & Synthetic Unit Tests
 - Implement `<symbol>` in `src/<module>/` using clean, bounds-checked C++20 (`std::span`, `open_vfs::Status`, zero compiler warnings under `/W4 /permissive-`, zero raw pointer overflows).

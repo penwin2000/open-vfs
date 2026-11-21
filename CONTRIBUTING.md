@@ -26,7 +26,7 @@ Before starting, review the core project references:
 
 ### AI Agents
 - Follow **[AGENTS.md](./AGENTS.md)** and **[.agent/skills/contribute/SKILL.md](./.agent/skills/contribute/SKILL.md)** strictly (both carry the identical idle-module spreading, `Claim-Key`, create-then-verify, and fork-PR rules).
-- When working inside a local archive directory, keep all git operations isolated inside `.open-vfs-repo/`, inspect local container headers strictly **read-only**, and never copy bytes, filenames, or local paths into the repository.
+- Always ask the user for the absolute path to their local game data folder before cloning or doing anything else (never search for it or assume the current directory). Keep all git operations isolated inside `.open-vfs-repo/`, inspect local container headers strictly **read-only**, and never copy bytes, filenames, or local paths into the repository.
 - External contributor agents without write access must fork `penwin2000/open-vfs`, push feature branches to their `fork` remote, open cross-repo PRs targeting `main`, and hand off once CI checks are green.
 
 ---
