@@ -1,7 +1,9 @@
 #include "test_harness.hpp"
 #include "rds5/rds5.hpp"
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -37,11 +39,84 @@ void write_etpf_header(std::vector<uint8_t>& buf,
                        uint32_t magic,
                        uint32_t version,
                        uint32_t entry_count,
-                       uint32_t secondary_offset) {
+                       uint32_t aux_pool_size) {
     test::write_u32_le(buf, offset + 0, magic);
     test::write_u32_le(buf, offset + 4, version);
     test::write_u32_le(buf, offset + 8, entry_count);
-    test::write_u32_le(buf, offset + 12, secondary_offset);
+    test::write_u32_le(buf, offset + 12, aux_pool_size);
+}
+
+void write_etpf_descriptor(std::vector<uint8_t>& buf,
+                           std::size_t offset,
+                           const EtpfTextureDescriptor& desc) {
+    const auto packed = pack_etpf_texture_descriptor(desc);
+    OVF_EXPECT(packed.has_value());
+    const auto words = packed.value_or(EtpfPackedDescriptorWords{});
+    test::write_u32_le(buf, offset + 0, words.w0);
+    test::write_u32_le(buf, offset + 4, words.w1);
+    test::write_u64_le(buf, offset + 8, words.q23);
+}
+
+EtpfTextureDescriptor make_texture_desc(uint16_t width,
+                                        uint16_t height,
+                                        uint8_t dimension_flags,
+                                        uint8_t depth_or_slices,
+                                        uint32_t virt_page,
+                                        std::array<uint8_t, 4> chunk_codes = {11u, 0u, 0u, 0u},
+                                        uint8_t dxgi_format = 98u) {
+    EtpfTextureDescriptor desc{};
+    desc.width = width;
+    desc.height = height;
+    desc.tail_mip_count = 4u;
+    desc.streamed_mip_count = 2u;
+    desc.dxgi_format = dxgi_format;
+    desc.depth_or_slices = depth_or_slices;
+    desc.dimension_flags = dimension_flags;
+    desc.packed_tier_count = 1u;
+    desc.is_cube_tile_flag = (dimension_flags == static_cast<uint8_t>(EtpfTextureDimension::TextureCube));
+    desc.aux_flag_10 = false;
+    desc.virt_page = virt_page;
+    desc.chunk_size_codes = chunk_codes;
+    desc.sub64k_chunk_count = 1u;
+    desc.tile0_free_pages = 3u;
+    return desc;
+}
+
+std::vector<uint8_t> build_synthetic_etpf_chunk(
+    const std::vector<EtpfTextureDescriptor>& descriptors,
+    const std::vector<uint64_t>& keys,
+    const std::vector<uint64_t>& secondary_entries,
+    const std::vector<uint8_t>& aux_pool,
+    std::size_t padded_size = 0u) {
+    OVF_EXPECT(descriptors.size() == keys.size());
+    OVF_EXPECT(descriptors.size() == secondary_entries.size());
+
+    const std::size_t n = descriptors.size();
+    const std::size_t active_span = kEtpfHeaderSize + (n * kEtpfTotalBytesPerEntry) + aux_pool.size();
+    const std::size_t total_size = padded_size > active_span ? padded_size : active_span;
+    std::vector<uint8_t> buf(total_size, 0);
+
+    write_etpf_header(buf, 0, kEtpfMagic, kEtpfVersion,
+                      static_cast<uint32_t>(n),
+                      static_cast<uint32_t>(aux_pool.size()));
+
+    std::size_t cursor = kEtpfHeaderSize;
+    for (const auto& desc : descriptors) {
+        write_etpf_descriptor(buf, cursor, desc);
+        cursor += kEtpfDescriptorSize;
+    }
+    for (uint64_t key : keys) {
+        test::write_u64_le(buf, cursor, key);
+        cursor += kEtpfKeySize;
+    }
+    for (uint64_t sec : secondary_entries) {
+        test::write_u64_le(buf, cursor, sec);
+        cursor += kEtpfSecondaryEntrySize;
+    }
+    for (std::size_t i = 0; i < aux_pool.size(); ++i) {
+        buf[cursor + i] = aux_pool[i];
+    }
+    return buf;
 }
 
 }  // namespace
@@ -210,8 +285,30 @@ int main() {
         test::write_u64_le(container, 0x10 + 3 * 8, must_pack(kContainerSize, 0x0u, kTotalUncompressed, 0u));
 
         // Populate unencrypted ETPF resource table at Chunk 0 (offset 0x100, stored_size 352)
-        // 12 primary entries => primary_table_end = 0x10 + 12 * 16 = 0xD0 (208 bytes)
-        write_etpf_header(container, 0x0100, kEtpfMagic, kEtpfVersion, 12u, 0xD0u);
+        // 10 entries + 16-byte aux pool => 0x10 + 32 * 10 + 16 = 352 bytes exact fit
+        {
+            std::vector<EtpfTextureDescriptor> chunk0_descs;
+            std::vector<uint64_t> chunk0_keys;
+            std::vector<uint64_t> chunk0_sec;
+            for (uint32_t i = 0; i < 10u; ++i) {
+                chunk0_descs.push_back(make_texture_desc(
+                    static_cast<uint16_t>(64u << (i % 4u)),
+                    static_cast<uint16_t>(64u << (i % 4u)),
+                    static_cast<uint8_t>(EtpfTextureDimension::Texture2D),
+                    1u,
+                    i * 16u,
+                    {11u, 0u, 0u, 0u}));
+                chunk0_keys.push_back((uint64_t{i + 1u} << 4u) | 0x3ull);
+                chunk0_sec.push_back(0xA5A5000000000000ull ^ static_cast<uint64_t>(i));
+            }
+            const std::vector<uint8_t> chunk0_aux(16u, 0x5Au);
+            const auto chunk0_bytes =
+                build_synthetic_etpf_chunk(chunk0_descs, chunk0_keys, chunk0_sec, chunk0_aux);
+            OVF_EXPECT(chunk0_bytes.size() == 352u);
+            for (std::size_t i = 0; i < chunk0_bytes.size(); ++i) {
+                container[0x0100u + i] = chunk0_bytes[i];
+            }
+        }
 
         Rds5Header hdr{};
         OVF_EXPECT(parse_rds5_header(container, hdr) == Status::Ok);
@@ -257,7 +354,7 @@ int main() {
         OVF_EXPECT(chunks[2].trailing_padding == 256u);
         OVF_EXPECT(chunks[2].codec_id == 0x3u);
 
-        // Parse ETPF header directly from Chunk 0 stored payload slice
+        // Parse ETPF header and full table directly from Chunk 0 stored payload slice
         const std::span<const uint8_t> chunk0_slice(
             container.data() + chunks[0].disk_offset,
             static_cast<std::size_t>(chunks[0].stored_size));
@@ -265,8 +362,17 @@ int main() {
         OVF_EXPECT(parse_etpf_header(chunk0_slice, etpf) == Status::Ok);
         OVF_EXPECT(etpf.magic == kEtpfMagic);
         OVF_EXPECT(etpf.version == kEtpfVersion);
-        OVF_EXPECT(etpf.entry_count == 12u);
-        OVF_EXPECT(etpf.secondary_table_offset == 0xD0u);
+        OVF_EXPECT(etpf.entry_count == 10u);
+        OVF_EXPECT(etpf.aux_pool_size == 16u);
+        OVF_EXPECT(etpf.total_span() == 352ull);
+
+        EtpfTable chunk0_table{};
+        OVF_EXPECT(parse_etpf_table(chunk0_slice, chunk0_table) == Status::Ok);
+        OVF_EXPECT(chunk0_table.descriptors.size() == 10u);
+        OVF_EXPECT(chunk0_table.resource_keys.size() == 10u);
+        OVF_EXPECT(chunk0_table.secondary_entries.size() == 10u);
+        OVF_EXPECT(chunk0_table.aux_pool.size() == 16u);
+        OVF_EXPECT(chunk0_table.find_key_index((uint64_t{5u} << 4u) | 0x3ull) == std::optional<std::size_t>{4u});
 
         // Prefix-only mode (validate_full_container = false) accepts just header + descriptor table
         const std::span<const uint8_t> table_only(container.data(), 0x10 + kDescCount * 8);
@@ -452,69 +558,545 @@ int main() {
         OVF_EXPECT(parse_rds5_chunk_index(buf31, hdr31, chunks31) == Status::AlignmentError);
     }
 
-    // 6. ETPF Chunk 0 header parsing edge & error cases
+    // 6. ETPF Chunk 0 header parsing (0x10 + 32*N + S_aux), odd/even N, alignment & overflow traps
     {
-        // Exact-fit 0-entry ETPF table (16 bytes total, secondary_table_offset == 0x10)
+        // Exact-fit 0-entry ETPF table (16 bytes total, aux_pool_size == 0)
         std::vector<uint8_t> etpf_empty(kEtpfHeaderSize, 0);
-        write_etpf_header(etpf_empty, 0, kEtpfMagic, kEtpfVersion, 0u, 0x10u);
+        write_etpf_header(etpf_empty, 0, kEtpfMagic, kEtpfVersion, 0u, 0u);
         EtpfHeader parsed{};
         OVF_EXPECT(parse_etpf_header(etpf_empty, parsed) == Status::Ok);
         OVF_EXPECT(parsed.magic == kEtpfMagic);
         OVF_EXPECT(parsed.version == kEtpfVersion);
         OVF_EXPECT(parsed.entry_count == 0u);
-        OVF_EXPECT(parsed.secondary_table_offset == 0x10u);
+        OVF_EXPECT(parsed.aux_pool_size == 0u);
+        OVF_EXPECT(parsed.descriptors_offset() == 0x10ull);
+        OVF_EXPECT(parsed.keys_offset() == 0x10ull);
+        OVF_EXPECT(parsed.secondary_offset() == 0x10ull);
+        OVF_EXPECT(parsed.aux_pool_offset() == 0x10ull);
+        OVF_EXPECT(parsed.total_span() == 0x10ull);
 
-        // Valid table with 3 entries (primary ends at 0x40), secondary starts at 0x50, total 0x80
-        std::vector<uint8_t> etpf_buf(0x80, 0);
-        write_etpf_header(etpf_buf, 0, kEtpfMagic, kEtpfVersion, 3u, 0x50u);
-        OVF_EXPECT(parse_etpf_header(etpf_buf, parsed) == Status::Ok);
-        OVF_EXPECT(parsed.entry_count == 3u);
-        OVF_EXPECT(parsed.secondary_table_offset == 0x50u);
-
-        // Truncated header (< 16 bytes)
-        OVF_EXPECT(parse_etpf_header({}, parsed) == Status::OutOfBounds);
-        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_buf.data(), 15), parsed) ==
+        // 0 entries with 32-byte aligned aux pool -> exact fit 48 bytes (0x30)
+        std::vector<uint8_t> etpf_aux_only(0x30u, 0);
+        write_etpf_header(etpf_aux_only, 0, kEtpfMagic, kEtpfVersion, 0u, 32u);
+        OVF_EXPECT(parse_etpf_header(etpf_aux_only, parsed) == Status::Ok);
+        OVF_EXPECT(parsed.entry_count == 0u);
+        OVF_EXPECT(parsed.aux_pool_size == 32u);
+        OVF_EXPECT(parsed.total_span() == 0x30ull);
+        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_aux_only.data(), 0x2Fu), parsed) ==
                    Status::OutOfBounds);
+
+        // Odd entry_count (N = 3, S_aux = 0):
+        // descriptors [0x10..0x40), keys [0x40..0x58) (8 mod 16), secondary [0x58..0x70), aux [0x70..0x70)
+        std::vector<uint8_t> etpf_odd(0x70u, 0);
+        write_etpf_header(etpf_odd, 0, kEtpfMagic, kEtpfVersion, 3u, 0u);
+        OVF_EXPECT(parse_etpf_header(etpf_odd, parsed) == Status::Ok);
+        OVF_EXPECT(parsed.entry_count == 3u);
+        OVF_EXPECT(parsed.aux_pool_size == 0u);
+        OVF_EXPECT(parsed.keys_offset() == 0x40ull);
+        OVF_EXPECT(parsed.secondary_offset() == 0x58ull);
+        OVF_EXPECT(parsed.aux_pool_offset() == 0x70ull);
+        OVF_EXPECT(parsed.total_span() == 0x70ull);
+        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_odd.data(), 0x6Fu), parsed) ==
+                   Status::OutOfBounds);
+
+        // Odd entry_count with aux pool (N = 5, S_aux = 32) inside 4 KiB Chunk 0 zero-padded buffer
+        // 0x10 + 32 * 5 + 32 = 0xD0 (208 bytes)
+        std::vector<uint8_t> etpf_odd_padded(4096u, 0);
+        write_etpf_header(etpf_odd_padded, 0, kEtpfMagic, kEtpfVersion, 5u, 32u);
+        OVF_EXPECT(parse_etpf_header(etpf_odd_padded, parsed) == Status::Ok);
+        OVF_EXPECT(parsed.entry_count == 5u);
+        OVF_EXPECT(parsed.aux_pool_size == 32u);
+        OVF_EXPECT(parsed.keys_offset() == 0x60ull);
+        OVF_EXPECT(parsed.secondary_offset() == 0x88ull);
+        OVF_EXPECT(parsed.aux_pool_offset() == 0xB0ull);
+        OVF_EXPECT(parsed.total_span() == 0xD0ull);
+        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_odd_padded.data(), 0xD0u), parsed) ==
+                   Status::Ok);
+        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_odd_padded.data(), 0xCFu), parsed) ==
+                   Status::OutOfBounds);
+
+        // Even entry_count (N = 4, S_aux = 16): 0x10 + 32 * 4 + 16 = 0xA0 (160 bytes)
+        std::vector<uint8_t> etpf_even(0xA0u, 0);
+        write_etpf_header(etpf_even, 0, kEtpfMagic, kEtpfVersion, 4u, 16u);
+        OVF_EXPECT(parse_etpf_header(etpf_even, parsed) == Status::Ok);
+        OVF_EXPECT(parsed.entry_count == 4u);
+        OVF_EXPECT(parsed.aux_pool_size == 16u);
+        OVF_EXPECT(parsed.keys_offset() == 0x50ull);
+        OVF_EXPECT(parsed.secondary_offset() == 0x70ull);
+        OVF_EXPECT(parsed.aux_pool_offset() == 0x90ull);
+        OVF_EXPECT(parsed.total_span() == 0xA0ull);
+        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_even.data(), 0x9Fu), parsed) ==
+                   Status::OutOfBounds);
+
+        // Truncated header (< 16 bytes) preserves previous output
+        EtpfHeader preserved = parsed;
+        OVF_EXPECT(parse_etpf_header({}, preserved) == Status::OutOfBounds);
+        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_even.data(), 15), preserved) ==
+                   Status::OutOfBounds);
+        OVF_EXPECT(preserved.entry_count == 4u);
+        OVF_EXPECT(preserved.aux_pool_size == 16u);
 
         // Bad magic (reversed and invalid)
-        auto bad_etpf = etpf_buf;
+        auto bad_etpf = etpf_even;
         test::write_u32_le(bad_etpf, 0, 0x45545046u);  // Reversed "FPTE"
-        OVF_EXPECT(parse_etpf_header(bad_etpf, parsed) == Status::InvalidMagic);
+        OVF_EXPECT(parse_etpf_header(bad_etpf, preserved) == Status::InvalidMagic);
         test::write_u32_le(bad_etpf, 0, 0x00000000u);
-        OVF_EXPECT(parse_etpf_header(bad_etpf, parsed) == Status::InvalidMagic);
+        OVF_EXPECT(parse_etpf_header(bad_etpf, preserved) == Status::InvalidMagic);
 
         // Wrong version
-        auto bad_ver = etpf_buf;
+        auto bad_ver = etpf_even;
         test::write_u32_le(bad_ver, 4, 0x00000279u);
-        OVF_EXPECT(parse_etpf_header(bad_ver, parsed) == Status::UnsupportedFormat);
+        OVF_EXPECT(parse_etpf_header(bad_ver, preserved) == Status::UnsupportedFormat);
         test::write_u32_le(bad_ver, 4, 0x0000027Bu);
-        OVF_EXPECT(parse_etpf_header(bad_ver, parsed) == Status::UnsupportedFormat);
+        OVF_EXPECT(parse_etpf_header(bad_ver, preserved) == Status::UnsupportedFormat);
 
-        // Primary table exceeds buffer by 1 byte (3 entries need 0x40 bytes; pass 0x3F)
-        OVF_EXPECT(parse_etpf_header(std::span<const uint8_t>(etpf_buf.data(), 0x3F), parsed) ==
-                   Status::OutOfBounds);
-
-        // Secondary sub-table offset exceeds buffer by 1 byte (0x81 > 0x80)
-        auto oob_sec = etpf_buf;
-        test::write_u32_le(oob_sec, 12, 0x81u);
-        OVF_EXPECT(parse_etpf_header(oob_sec, parsed) == Status::OutOfBounds);
-
-        // Secondary sub-table offset overlaps header (0x00, 0x08) or primary descriptors (0x3F)
-        auto overlap_sec = etpf_buf;
-        for (uint32_t bad_sec : {0x00u, 0x08u, 0x3Fu}) {
-            test::write_u32_le(overlap_sec, 12, bad_sec);
-            OVF_EXPECT(parse_etpf_header(overlap_sec, parsed) == Status::CorruptData);
+        // Misaligned aux_pool_size (S_aux % 16 != 0) rejected with AlignmentError
+        auto bad_aux_align = etpf_even;
+        for (uint32_t bad_aux : {1u, 4u, 8u, 12u, 15u, 17u, 24u, 31u, 0xFFFFFFFFu}) {
+            test::write_u32_le(bad_aux_align, 12, bad_aux);
+            OVF_EXPECT(parse_etpf_header(bad_aux_align, preserved) == Status::AlignmentError);
         }
 
-        // 32-bit multiplication overflow trap: 0x10000001u * 16 wraps to 16 in uint32_t
-        auto overflow_etpf = etpf_buf;
+        // Aligned aux_pool_size exceeding buffer by 16 bytes -> OutOfBounds
+        auto oob_aux = etpf_even;
+        test::write_u32_le(oob_aux, 12, 32u);
+        OVF_EXPECT(parse_etpf_header(oob_aux, preserved) == Status::OutOfBounds);
+
+        // 32-bit multiplication & addition overflow traps
+        auto overflow_etpf = etpf_even;
+        // 0x08000001u * 32 wraps to 32 in uint32_t
+        test::write_u32_le(overflow_etpf, 8, 0x08000001u);
+        test::write_u32_le(overflow_etpf, 12, 0u);
+        OVF_EXPECT(parse_etpf_header(overflow_etpf, preserved) == Status::OutOfBounds);
+        // 0x10000001u * 16 wraps to 16 in uint32_t
         test::write_u32_le(overflow_etpf, 8, 0x10000001u);
-        OVF_EXPECT(parse_etpf_header(overflow_etpf, parsed) == Status::OutOfBounds);
+        OVF_EXPECT(parse_etpf_header(overflow_etpf, preserved) == Status::OutOfBounds);
+        // Max u32 entry_count with zero or max aligned aux_pool_size
         test::write_u32_le(overflow_etpf, 8, 0xFFFFFFFFu);
-        OVF_EXPECT(parse_etpf_header(overflow_etpf, parsed) == Status::OutOfBounds);
+        test::write_u32_le(overflow_etpf, 12, 0u);
+        OVF_EXPECT(parse_etpf_header(overflow_etpf, preserved) == Status::OutOfBounds);
+        test::write_u32_le(overflow_etpf, 12, 0xFFFFFFF0u);
+        OVF_EXPECT(parse_etpf_header(overflow_etpf, preserved) == Status::OutOfBounds);
+        // Zero entries with huge aligned aux_pool_size
+        test::write_u32_le(overflow_etpf, 8, 0u);
+        test::write_u32_le(overflow_etpf, 12, 0xFFFFFFF0u);
+        OVF_EXPECT(parse_etpf_header(overflow_etpf, preserved) == Status::OutOfBounds);
+        OVF_EXPECT(preserved.entry_count == 4u);
     }
 
-    // 7. Pending stubs return NotImplemented cleanly
+    // 7. Verified 5-bit ETPF chunk_size_codes lookup table (exhaustive codes 0..31 + out-of-range)
+    {
+        constexpr std::array<std::optional<uint32_t>, 32> kExpectedPages = {{
+            0u,            //  0: absent / empty slot
+            1u,            //  1:    4 KiB
+            2u,            //  2:    8 KiB
+            3u,            //  3:   12 KiB
+            4u,            //  4:   16 KiB
+            5u,            //  5:   20 KiB
+            6u,            //  6:   24 KiB
+            7u,            //  7:   28 KiB
+            8u,            //  8:   32 KiB
+            std::nullopt,  //  9: unobserved
+            12u,           // 10:   48 KiB
+            16u,           // 11:   64 KiB
+            24u,           // 12:   96 KiB
+            32u,           // 13:  128 KiB
+            48u,           // 14:  192 KiB
+            64u,           // 15:  256 KiB
+            128u,          // 16:  512 KiB
+            std::nullopt,  // 17: unobserved
+            std::nullopt,  // 18: unobserved
+            std::nullopt,  // 19: unobserved
+            std::nullopt,  // 20: unobserved
+            18u,           // 21:   72 KiB
+            80u,           // 22:  320 KiB
+            96u,           // 23:  384 KiB
+            144u,          // 24:  576 KiB
+            std::nullopt,  // 25: unobserved
+            272u,          // 26: 1088 KiB
+            384u,          // 27: 1536 KiB
+            528u,          // 28: 2112 KiB
+            std::nullopt,  // 29: unobserved
+            std::nullopt,  // 30: unobserved
+            std::nullopt,  // 31: unobserved
+        }};
+
+        for (uint8_t code = 0u; code < 32u; ++code) {
+            const auto pages = lookup_etpf_chunk_size_pages(code);
+            const auto bytes = lookup_etpf_chunk_size_bytes(code);
+            OVF_EXPECT(pages == kExpectedPages[code]);
+            if (kExpectedPages[code].has_value()) {
+                OVF_EXPECT(bytes.has_value());
+                OVF_EXPECT(*bytes == static_cast<uint64_t>(*kExpectedPages[code]) * kRds5VirtualPageSize);
+            } else {
+                OVF_EXPECT(!bytes.has_value());
+            }
+        }
+
+        // Out-of-range (> 31) codes return std::nullopt
+        for (uint8_t bad_code : {uint8_t{32u}, uint8_t{33u}, uint8_t{63u}, uint8_t{255u}}) {
+            OVF_EXPECT(!lookup_etpf_chunk_size_pages(bad_code).has_value());
+            OVF_EXPECT(!lookup_etpf_chunk_size_bytes(bad_code).has_value());
+        }
+    }
+
+    // 8. ETPF 16-byte GPU texture descriptor bitfield round-trips (2D, Cube, 3D, 2DArray) & errors
+    {
+        auto verify_round_trip = [](const EtpfTextureDescriptor& expected) {
+            std::vector<uint8_t> buf(kEtpfDescriptorSize, 0);
+            write_etpf_descriptor(buf, 0, expected);
+
+            EtpfTextureDescriptor decoded{};
+            OVF_EXPECT(parse_etpf_texture_descriptor(buf, decoded) == Status::Ok);
+            OVF_EXPECT(decoded.width == expected.width);
+            OVF_EXPECT(decoded.height == expected.height);
+            OVF_EXPECT(decoded.tail_mip_count == expected.tail_mip_count);
+            OVF_EXPECT(decoded.streamed_mip_count == expected.streamed_mip_count);
+            OVF_EXPECT(decoded.dxgi_format == expected.dxgi_format);
+            OVF_EXPECT(decoded.depth_or_slices == expected.depth_or_slices);
+            OVF_EXPECT(decoded.dimension_flags == expected.dimension_flags);
+            OVF_EXPECT(decoded.dimension() == static_cast<EtpfTextureDimension>(expected.dimension_flags));
+            OVF_EXPECT(decoded.packed_tier_count == expected.packed_tier_count);
+            OVF_EXPECT(decoded.is_cube_tile_flag == expected.is_cube_tile_flag);
+            OVF_EXPECT(decoded.aux_flag_10 == expected.aux_flag_10);
+            OVF_EXPECT(decoded.virt_page == expected.virt_page);
+            OVF_EXPECT(decoded.virtual_offset_bytes() ==
+                       static_cast<uint64_t>(expected.virt_page) * kRds5VirtualPageSize);
+            OVF_EXPECT(decoded.chunk_size_codes == expected.chunk_size_codes);
+            OVF_EXPECT(decoded.sub64k_chunk_count == expected.sub64k_chunk_count);
+            OVF_EXPECT(decoded.tile0_free_pages == expected.tile0_free_pages);
+        };
+
+        // Texture2D (dimension_flags = 1)
+        {
+            EtpfTextureDescriptor d2d{};
+            d2d.width = 2048u;
+            d2d.height = 1024u;
+            d2d.tail_mip_count = 6u;
+            d2d.streamed_mip_count = 3u;
+            d2d.dxgi_format = 98u;  // BC7_UNORM
+            d2d.depth_or_slices = 1u;
+            d2d.dimension_flags = static_cast<uint8_t>(EtpfTextureDimension::Texture2D);
+            d2d.packed_tier_count = 2u;
+            d2d.is_cube_tile_flag = false;
+            d2d.aux_flag_10 = false;
+            d2d.virt_page = 0x001234u;
+            d2d.chunk_size_codes = {15u, 13u, 11u, 4u};
+            d2d.sub64k_chunk_count = 1u;
+            d2d.tile0_free_pages = 7u;
+            verify_round_trip(d2d);
+        }
+
+        // TextureCube (dimension_flags = 2)
+        {
+            EtpfTextureDescriptor cube{};
+            cube.width = 512u;
+            cube.height = 512u;
+            cube.tail_mip_count = 5u;
+            cube.streamed_mip_count = 2u;
+            cube.dxgi_format = 95u;  // BC6H_UF16
+            cube.depth_or_slices = 6u;
+            cube.dimension_flags = static_cast<uint8_t>(EtpfTextureDimension::TextureCube);
+            cube.packed_tier_count = 4u;
+            cube.is_cube_tile_flag = true;
+            cube.aux_flag_10 = true;
+            cube.virt_page = 0x045678u;
+            cube.chunk_size_codes = {23u, 14u, 10u, 0u};
+            cube.sub64k_chunk_count = 2u;
+            cube.tile0_free_pages = 11u;
+            verify_round_trip(cube);
+        }
+
+        // Texture3D (dimension_flags = 3)
+        {
+            EtpfTextureDescriptor vol{};
+            vol.width = 64u;
+            vol.height = 128u;
+            vol.tail_mip_count = 3u;
+            vol.streamed_mip_count = 1u;
+            vol.dxgi_format = 71u;  // BC1_UNORM
+            vol.depth_or_slices = 32u;
+            vol.dimension_flags = static_cast<uint8_t>(EtpfTextureDimension::Texture3D);
+            vol.packed_tier_count = 3u;
+            vol.is_cube_tile_flag = false;
+            vol.aux_flag_10 = true;
+            vol.virt_page = 0x0ABCDEu;
+            vol.chunk_size_codes = {21u, 12u, 8u, 1u};
+            vol.sub64k_chunk_count = 3u;
+            vol.tile0_free_pages = 0u;
+            verify_round_trip(vol);
+        }
+
+        // Texture2DArray (dimension_flags = 5)
+        {
+            EtpfTextureDescriptor arr{};
+            arr.width = 1024u;
+            arr.height = 1024u;
+            arr.tail_mip_count = 9u;
+            arr.streamed_mip_count = 4u;
+            arr.dxgi_format = 83u;  // BC5_UNORM
+            arr.depth_or_slices = 16u;
+            arr.dimension_flags = static_cast<uint8_t>(EtpfTextureDimension::Texture2DArray);
+            arr.packed_tier_count = 5u;
+            arr.is_cube_tile_flag = false;
+            arr.aux_flag_10 = true;
+            arr.virt_page = 0x10F00Du;
+            arr.chunk_size_codes = {28u, 27u, 26u, 24u};
+            arr.sub64k_chunk_count = 0u;
+            arr.tile0_free_pages = 15u;
+            verify_round_trip(arr);
+        }
+
+        // Min & Max extreme bitfield boundaries (confirming zero bit bleed across all fields)
+        {
+            EtpfTextureDescriptor min_desc{};
+            min_desc.width = 1u;
+            min_desc.height = 1u;
+            min_desc.tail_mip_count = 0u;
+            min_desc.streamed_mip_count = 0u;
+            min_desc.dxgi_format = 0u;
+            min_desc.depth_or_slices = 1u;
+            min_desc.dimension_flags = static_cast<uint8_t>(EtpfTextureDimension::Texture2D);
+            min_desc.packed_tier_count = 0u;
+            min_desc.is_cube_tile_flag = false;
+            min_desc.aux_flag_10 = false;
+            min_desc.virt_page = 0u;
+            min_desc.chunk_size_codes = {0u, 0u, 0u, 0u};
+            min_desc.sub64k_chunk_count = 0u;
+            min_desc.tile0_free_pages = 0u;
+            verify_round_trip(min_desc);
+
+            EtpfTextureDescriptor max_desc{};
+            max_desc.width = kEtpfMaxDimension;
+            max_desc.height = kEtpfMaxDimension;
+            max_desc.tail_mip_count = 15u;
+            max_desc.streamed_mip_count = 7u;
+            max_desc.dxgi_format = 127u;
+            max_desc.depth_or_slices = kEtpfMaxDepthOrSlices;
+            max_desc.dimension_flags = static_cast<uint8_t>(EtpfTextureDimension::Texture2DArray);
+            max_desc.packed_tier_count = 7u;
+            max_desc.is_cube_tile_flag = true;
+            max_desc.aux_flag_10 = true;
+            max_desc.virt_page = kEtpfMaxVirtPage;
+            max_desc.chunk_size_codes = {31u, 30u, 29u, 25u};  // Unobserved raw codes still decode
+            max_desc.sub64k_chunk_count = 3u;
+            max_desc.tile0_free_pages = 15u;
+            verify_round_trip(max_desc);
+
+            // Verify raw bit positions explicitly on max_desc
+            const auto packed_max = pack_etpf_texture_descriptor(max_desc);
+            OVF_EXPECT(packed_max.has_value());
+            OVF_EXPECT(packed_max->w0 == 0xFFFFFFFFu);
+            OVF_EXPECT(packed_max->w1 == ((7u) | (127u << 3u) | (63u << 10u) | (5u << 21u) |
+                                          (7u << 24u) | (1u << 27u) | (1u << 28u)));
+            OVF_EXPECT(packed_max->q23 == (0x1FFFFFull | (31ull << 21u) | (30ull << 26u) |
+                                           (29ull << 31u) | (25ull << 36u) | (3ull << 51u) |
+                                           (15ull << 53u)));
+        }
+
+        // Strict rejection of invalid dimension_flags outside {1, 2, 3, 5}
+        {
+            std::vector<uint8_t> raw_desc(kEtpfDescriptorSize, 0);
+            EtpfTextureDescriptor preserved = make_texture_desc(
+                256u, 256u, static_cast<uint8_t>(EtpfTextureDimension::Texture2D), 1u, 42u);
+            for (uint8_t bad_dim : {uint8_t{0u}, uint8_t{4u}, uint8_t{6u}, uint8_t{7u}}) {
+                test::write_u32_le(raw_desc, 0, 0u);
+                test::write_u32_le(raw_desc, 4, static_cast<uint32_t>(bad_dim) << 21u);
+                test::write_u64_le(raw_desc, 8, 0ull);
+                OVF_EXPECT(parse_etpf_texture_descriptor(raw_desc, preserved) ==
+                           Status::UnsupportedFormat);
+                OVF_EXPECT(preserved.virt_page == 42u);
+            }
+
+            // Truncated descriptor buffer rejected without clobbering output
+            OVF_EXPECT(parse_etpf_texture_descriptor({}, preserved) == Status::OutOfBounds);
+            OVF_EXPECT(parse_etpf_texture_descriptor(
+                           std::span<const uint8_t>(raw_desc.data(), 15), preserved) ==
+                       Status::OutOfBounds);
+            OVF_EXPECT(preserved.virt_page == 42u);
+        }
+
+        // Packer rejects out-of-range fields
+        {
+            EtpfTextureDescriptor valid = make_texture_desc(
+                128u, 128u, static_cast<uint8_t>(EtpfTextureDimension::Texture2D), 1u, 1u);
+            OVF_EXPECT(pack_etpf_texture_descriptor(valid).has_value());
+
+            auto bad = valid; bad.width = 0u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.width = kEtpfMaxDimension + 1u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.height = 0u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.depth_or_slices = 0u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.depth_or_slices = kEtpfMaxDepthOrSlices + 1u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.dimension_flags = 4u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.virt_page = kEtpfMaxVirtPage + 1u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.chunk_size_codes[2] = 32u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.sub64k_chunk_count = 4u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+            bad = valid; bad.tile0_free_pages = 16u;
+            OVF_EXPECT(!pack_etpf_texture_descriptor(bad).has_value());
+        }
+    }
+
+    // 9. Full ETPF Chunk 0 table parsing: odd/even N, monotonic virt_page & ascending u64 keys
+    {
+        // Odd N = 3, S_aux = 32, padded to 4 KiB Chunk 0 boundary; equal adjacent virt_page allowed
+        const std::vector<EtpfTextureDescriptor> odd_descs = {
+            make_texture_desc(256u, 256u, static_cast<uint8_t>(EtpfTextureDimension::Texture2D), 1u, 10u, {11u, 0u, 0u, 0u}),
+            make_texture_desc(128u, 128u, static_cast<uint8_t>(EtpfTextureDimension::TextureCube), 6u, 10u, {14u, 10u, 0u, 0u}),
+            make_texture_desc(64u, 64u, static_cast<uint8_t>(EtpfTextureDimension::Texture3D), 16u, 42u, {13u, 8u, 4u, 0u}),
+        };
+        // Strictly ascending sharded keys (low 3 bits == shard 5)
+        const std::vector<uint64_t> odd_keys = {
+            0x0000000000001005ull,
+            0x0000000100002005ull,
+            0xF000000000003005ull,
+        };
+        const std::vector<uint64_t> odd_sec = {
+            0x1122334455667788ull,
+            0x99AABBCCDDEEFF00ull,
+            0xCAFEBABE12345678ull,
+        };
+        std::vector<uint8_t> odd_aux(32u);
+        for (std::size_t i = 0; i < odd_aux.size(); ++i) {
+            odd_aux[i] = static_cast<uint8_t>(0xC0u + i);
+        }
+
+        const auto odd_chunk0 = build_synthetic_etpf_chunk(odd_descs, odd_keys, odd_sec, odd_aux, 4096u);
+        OVF_EXPECT(odd_chunk0.size() == 4096u);
+
+        EtpfTable table{};
+        OVF_EXPECT(parse_etpf_table(odd_chunk0, table) == Status::Ok);
+        OVF_EXPECT(table.header.entry_count == 3u);
+        OVF_EXPECT(table.header.aux_pool_size == 32u);
+        OVF_EXPECT(table.header.keys_offset() == 0x40ull);
+        OVF_EXPECT(table.header.secondary_offset() == 0x58ull);
+        OVF_EXPECT(table.header.aux_pool_offset() == 0x70ull);
+        OVF_EXPECT(table.descriptors.size() == 3u);
+        OVF_EXPECT(table.descriptors[0].virt_page == 10u);
+        OVF_EXPECT(table.descriptors[1].virt_page == 10u);
+        OVF_EXPECT(table.descriptors[1].dimension() == EtpfTextureDimension::TextureCube);
+        OVF_EXPECT(table.descriptors[2].virt_page == 42u);
+        OVF_EXPECT(table.descriptors[2].dimension() == EtpfTextureDimension::Texture3D);
+        OVF_EXPECT(table.resource_keys == odd_keys);
+        OVF_EXPECT(table.secondary_entries == odd_sec);
+        OVF_EXPECT(table.aux_pool == odd_aux);
+        OVF_EXPECT(table.find_key_index(odd_keys[0]) == std::optional<std::size_t>{0u});
+        OVF_EXPECT(table.find_key_index(odd_keys[1]) == std::optional<std::size_t>{1u});
+        OVF_EXPECT(table.find_key_index(odd_keys[2]) == std::optional<std::size_t>{2u});
+        OVF_EXPECT(!table.find_key_index(0x0000000000001006ull).has_value());
+
+        // Even N = 4 exact-fit (no trailing padding), covering all 4 dimension kinds
+        const std::vector<EtpfTextureDescriptor> even_descs = {
+            make_texture_desc(512u, 256u, static_cast<uint8_t>(EtpfTextureDimension::Texture2D), 1u, 0u, {13u, 0u, 0u, 0u}),
+            make_texture_desc(256u, 256u, static_cast<uint8_t>(EtpfTextureDimension::TextureCube), 6u, 32u, {23u, 11u, 0u, 0u}),
+            make_texture_desc(32u, 32u, static_cast<uint8_t>(EtpfTextureDimension::Texture3D), 32u, 128u, {11u, 0u, 0u, 0u}),
+            make_texture_desc(1024u, 1024u, static_cast<uint8_t>(EtpfTextureDimension::Texture2DArray), 8u, 256u, {28u, 26u, 24u, 16u}),
+        };
+        const std::vector<uint64_t> even_keys = {10ull, 20ull, 30ull, 40ull};
+        const std::vector<uint64_t> even_sec = {1ull, 2ull, 3ull, 4ull};
+        const std::vector<uint8_t> even_aux(16u, 0xABu);
+        const auto even_chunk0 = build_synthetic_etpf_chunk(even_descs, even_keys, even_sec, even_aux);
+        OVF_EXPECT(even_chunk0.size() == 0xA0u);
+
+        EtpfTable even_table{};
+        OVF_EXPECT(parse_etpf_table(even_chunk0, even_table) == Status::Ok);
+        OVF_EXPECT(even_table.descriptors.size() == 4u);
+        OVF_EXPECT(even_table.descriptors[3].dimension() == EtpfTextureDimension::Texture2DArray);
+        OVF_EXPECT(even_table.descriptors[3].depth_or_slices == 8u);
+        OVF_EXPECT(even_table.resource_keys == even_keys);
+        OVF_EXPECT(even_table.secondary_entries == even_sec);
+        OVF_EXPECT(even_table.aux_pool == even_aux);
+
+        // Empty table (N = 0, S_aux = 0) parses cleanly
+        std::vector<uint8_t> empty_chunk0(kEtpfHeaderSize, 0);
+        write_etpf_header(empty_chunk0, 0, kEtpfMagic, kEtpfVersion, 0u, 0u);
+        EtpfTable empty_table{};
+        OVF_EXPECT(parse_etpf_table(empty_chunk0, empty_table) == Status::Ok);
+        OVF_EXPECT(empty_table.descriptors.empty());
+        OVF_EXPECT(empty_table.resource_keys.empty());
+        OVF_EXPECT(empty_table.secondary_entries.empty());
+        OVF_EXPECT(empty_table.aux_pool.empty());
+
+        // Non-monotonic virt_page rejected with CorruptData (and stale output cleared)
+        {
+            auto bad_virt_descs = odd_descs;
+            bad_virt_descs[0].virt_page = 10u;
+            bad_virt_descs[1].virt_page = 20u;
+            bad_virt_descs[2].virt_page = 19u;  // Regresses below previous virt_page
+            const auto bad_virt_buf =
+                build_synthetic_etpf_chunk(bad_virt_descs, odd_keys, odd_sec, odd_aux);
+            OVF_EXPECT(parse_etpf_table(bad_virt_buf, table) == Status::CorruptData);
+            OVF_EXPECT(table.descriptors.empty());
+            OVF_EXPECT(table.resource_keys.empty());
+            OVF_EXPECT(table.secondary_entries.empty());
+            OVF_EXPECT(table.aux_pool.empty());
+        }
+
+        // Unsorted (descending) u64 keys rejected with CorruptData
+        {
+            const std::vector<uint64_t> descending_keys = {
+                0x0000000000001005ull,
+                0x0000000100003005ull,
+                0x0000000100002005ull,  // Out of order
+            };
+            const auto bad_keys_buf =
+                build_synthetic_etpf_chunk(odd_descs, descending_keys, odd_sec, odd_aux);
+            table = even_table;
+            OVF_EXPECT(parse_etpf_table(bad_keys_buf, table) == Status::CorruptData);
+            OVF_EXPECT(table.descriptors.empty());
+            OVF_EXPECT(table.resource_keys.empty());
+        }
+
+        // Duplicate u64 keys rejected with CorruptData (strictly ascending required)
+        {
+            const std::vector<uint64_t> dup_keys = {
+                0x0000000000001005ull,
+                0x0000000100002005ull,
+                0x0000000100002005ull,  // Duplicate key
+            };
+            const auto dup_keys_buf =
+                build_synthetic_etpf_chunk(odd_descs, dup_keys, odd_sec, odd_aux);
+            table = even_table;
+            OVF_EXPECT(parse_etpf_table(dup_keys_buf, table) == Status::CorruptData);
+            OVF_EXPECT(table.descriptors.empty());
+            OVF_EXPECT(table.resource_keys.empty());
+        }
+
+        // Invalid dimension_flags inside table rejected with UnsupportedFormat
+        {
+            auto bad_dim_buf = even_chunk0;
+            // Overwrite entry 2 w1 (+0x10 + 2*16 + 4 = 0x34) with invalid dimension_flags = 6
+            test::write_u32_le(bad_dim_buf, kEtpfHeaderSize + 2u * kEtpfDescriptorSize + 4u, 6u << 21u);
+            table = even_table;
+            OVF_EXPECT(parse_etpf_table(bad_dim_buf, table) == Status::UnsupportedFormat);
+            OVF_EXPECT(table.descriptors.empty());
+        }
+
+        // Truncated table or misaligned aux_pool_size rejected and clears stale output
+        {
+            table = even_table;
+            OVF_EXPECT(parse_etpf_table(
+                           std::span<const uint8_t>(even_chunk0.data(), even_chunk0.size() - 1u), table) ==
+                       Status::OutOfBounds);
+            OVF_EXPECT(table.descriptors.empty());
+
+            auto misaligned_aux_buf = even_chunk0;
+            test::write_u32_le(misaligned_aux_buf, 12, 8u);
+            table = even_table;
+            OVF_EXPECT(parse_etpf_table(misaligned_aux_buf, table) == Status::AlignmentError);
+            OVF_EXPECT(table.descriptors.empty());
+        }
+    }
+
+    // 10. Pending stubs return NotImplemented cleanly
     {
         std::vector<uint8_t> raw_chunk;
         std::vector<uint8_t> plain_chunk;

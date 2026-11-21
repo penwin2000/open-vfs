@@ -133,19 +133,6 @@ jobs:
           python tools/progress.py --scan | Out-File -Encoding utf8 progress.json
           python tools/progress.py --output progress.svg
 
-      - name: Commit updated progress.svg on main
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        shell: pwsh
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git diff --quiet progress.svg
-          if ($LASTEXITCODE -ne 0) {
-            git add progress.svg
-            git commit -m "chore(progress): regenerate progress.svg [skip ci]"
-            git push origin HEAD:main
-          }
-
       - name: Stage GitHub Pages site bundle
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         shell: pwsh
