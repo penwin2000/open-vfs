@@ -2,7 +2,7 @@
 
 This repository builds **`open-vfs.exe`**, a clean-room **C++20** and **DirectX 12** native Windows 11 desktop runtime for user-supplied local console archive directories.
 
-When a contributor opens their local data directory in Antigravity and says:
+When a contributor opens their local data directory in any AI coding harness (such as Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) and says:
 
 > `Set up https://github.com/penwin2000/open-vfs and start contributing`
 
