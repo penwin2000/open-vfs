@@ -15,7 +15,7 @@
 <p align="center">
   <a href="#the-goal"><strong>The Goal</strong></a>
   &nbsp;&middot;&nbsp;
-  <a href="#help-build-it-with-one-prompt"><strong>Contribute in One Prompt</strong></a>
+  <a href="#help-build-it-with-one-prompt"><strong>Contribute in 1 Prompt</strong></a>
   &nbsp;&middot;&nbsp;
   <a href="#check-if-your-folder-matches"><strong>Check Your Folder</strong></a>
   &nbsp;&middot;&nbsp;
@@ -25,6 +25,18 @@
   &nbsp;&middot;&nbsp;
   <a href="#for-developers"><strong>For Developers</strong></a>
 </p>
+
+<br>
+
+> [!TIP]
+> **Contribute in 1 Prompt (No Coding Needed)**
+> Open your local Xbox game folder in any AI coding app (Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) while signed in to GitHub (`gh`), copy-paste this line, and press Enter:
+>
+> ```text
+> Set up https://github.com/penwin2000/open-vfs and start contributing
+> ```
+>
+> Your AI automatically picks a free part of the port that nobody else is working on, keeps your game files private and read-only, and submits a Pull Request for you. [See how it works](#help-build-it-with-one-prompt)
 
 <br>
 
@@ -75,7 +87,7 @@ Set up https://github.com/penwin2000/open-vfs and start contributing
 
 | Step 1: Open Your Game Folder | Step 2: Send the Short Prompt | Step 3: Let Your AI Build & Submit |
 | :--- | :--- | :--- |
-| Open your local Xbox game folder in **any AI coding harness** while signed in to GitHub (`gh`). | Paste the short prompt above and press Enter. Nothing else is required from you. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), clones into a separate `.open-vfs-repo/` folder, picks one dark square from the map above, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
+| Open your local Xbox game folder in **any AI coding harness** while signed in to GitHub (`gh`). | Paste the short prompt above and press Enter. Nothing else is required from you. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), clones into a separate `.open-vfs-repo/` folder, automatically claims an open dark square nobody else is working on, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
 
 <br>
 

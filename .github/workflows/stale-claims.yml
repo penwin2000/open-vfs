@@ -1,0 +1,53 @@
+name: Stale Claims Reaper
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      stale_hours:
+        description: "Hours of inactivity without a linked PR before closing a Claim-Key issue"
+        required: false
+        default: "48"
+      dry_run:
+        description: "Log stale claims without closing them"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: "stale-claims-${{ github.repository }}"
+  cancel-in-progress: false
+
+jobs:
+  reap-stale-claims:
+    name: Release Stale Claim-Key Issues
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Release inactive Claim-Key issues
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          STALE_HOURS: ${{ inputs.stale_hours || '48' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(--reap-stale --stale-hours "${STALE_HOURS}")
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python3 tools/claim_guard.py "${args[@]}"
