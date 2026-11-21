@@ -16,17 +16,17 @@ Before starting, review the core project references:
 2. **Pick an unclaimed stub** via `python tools/progress.py --pick --from-gh --repo penwin2000/open-vfs` (which spreads contributors into idle modules first—treating any open `[<module>]` issue or PR as busy—and breaks ties randomly). Without local Python, run `gh issue list --repo penwin2000/open-vfs --state open --limit 100` and `gh pr list --repo penwin2000/open-vfs --state open --limit 100`, pick an idle module in the earliest incomplete milestone, and select an unclaimed `OPEN_VFS_STUB` in `src/<module>/`.
 3. **Open a claim issue & verify immediately:** Include `Claim-Key: <module>::<symbol>` in the issue body, then immediately re-run `gh issue list --repo penwin2000/open-vfs --state open --limit 100` (**never** `gh search issues`, which lags behind freshly opened issues). If an earlier open issue (`#M < #<yours>`) or open PR already claims `<module>::<symbol>`, close yours as a duplicate and pick another stub. Then create a branch named `feat/m<num>-<module>-<symbol>` off up-to-date `main`.
 4. **Implement & test** strictly inside `src/<module>/` and `tests/test_<module>.cpp`, flipping `OPEN_VFS_STUB` -> `OPEN_VFS_IMPL`.
-5. **Build & verify on Windows** (always pass `-- /m:1 /nr:false` to MSBuild so background worker nodes do not hang):
+5. **Build & verify on Windows** (always pass `-- -m:1 -nr:false` to MSBuild so background worker nodes do not hang):
    ```powershell
    cmake -B build -A x64
-   cmake --build build --config Release -- /m:1 /nr:false
+   cmake --build build --config Release -- -m:1 -nr:false
    ctest --test-dir build -C Release --output-on-failure
    ```
 6. **Open a Pull Request** targeting `main` using [.github/pull_request_template.md](./.github/pull_request_template.md) (including `Closes #<issue>` and `Claim-Key: <module>::<symbol>`) and wait for both **Build, Test & Progress Map** and **PR Guard** checks to pass.
 
 ### AI Agents
 - Follow **[AGENTS.md](./AGENTS.md)** and **[.agent/skills/contribute/SKILL.md](./.agent/skills/contribute/SKILL.md)** strictly (both carry the identical idle-module spreading, `Claim-Key`, create-then-verify, and fork-PR rules).
-- Always ask the user for the absolute path to their local game data folder before cloning or doing anything else (never search for it or assume the current directory). Keep all git operations isolated inside `.open-vfs-repo/`, inspect local container headers strictly **read-only**, and never copy bytes, filenames, or local paths into the repository.
+- Always ask the user for the absolute path to their local game data folder and wait for their confirmation before picking a stub or writing code (never search for it or assume the current directory; if they have no folder or decline to share it, continue in no-data mode). Keep all git operations in the current repository checkout—cloning into `.open-vfs-repo/` only when the tool was opened somewhere that is not already a checkout, such as directly inside the game data folder—treat the game data folder as strictly **read-only** with zero writes, and never copy bytes, filenames, or local paths into the repository.
 - External contributor agents without write access must fork `penwin2000/open-vfs`, push feature branches to their `fork` remote, open cross-repo PRs targeting `main`, and hand off once CI checks are green.
 
 ---
@@ -115,7 +115,7 @@ git checkout -b feat/m1-rpf9-parse-rpf9-block-header
 
 # 4. Build open-vfs.exe and verify CTest (Windows MSBuild flags required)
 cmake -B build -A x64
-cmake --build build --config Release -- /m:1 /nr:false
+cmake --build build --config Release -- -m:1 -nr:false
 ctest --test-dir build -C Release --output-on-failure
 
 # 5. Confirm macro status, PR Guard checks, and clean git tree

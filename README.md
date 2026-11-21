@@ -33,7 +33,7 @@
 > Open any AI coding app (Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) while signed in to GitHub (`gh`), copy-paste this line, and press Enter:
 >
 > ```text
-> Set up https://github.com/penwin2000/open-vfs and start contributing
+> Set up https://github.com/penwin2000/open-vfs, ask me for my local game folder first, and start contributing
 > ```
 >
 > Your AI first asks where your game folder is, then automatically picks a free part of the port that nobody else is working on, keeps your game files private and read-only, and submits a Pull Request for you. [See how it works](#help-build-it-with-one-prompt)
@@ -80,14 +80,14 @@ You bring your own local copy of the Xbox game folder ([check if your folder mat
 Copy and send this single short prompt inside your AI coding tool:
 
 ```text
-Set up https://github.com/penwin2000/open-vfs and start contributing
+Set up https://github.com/penwin2000/open-vfs, ask me for my local game folder first, and start contributing
 ```
 
 <br>
 
 | Step 1: Send the Short Prompt | Step 2: Tell Your AI Where Your Game Folder Is | Step 3: Let Your AI Build & Submit |
 | :--- | :--- | :--- |
-| Open **any AI coding harness** while signed in to GitHub (`gh`), paste the short prompt above, and press Enter. | Your AI always asks for the full path to your local Xbox game folder before doing anything else. Paste it in and the AI checks the folder read-only. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), clones into a separate `.open-vfs-repo/` folder inside your game folder, automatically claims an open dark square nobody else is working on, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
+| Open **any AI coding harness** while signed in to GitHub (`gh`), paste the short prompt above, and press Enter. | Your AI always asks for the full path to your local Xbox game folder before doing anything else. Paste it in and the AI checks the folder read-only. | Your AI reads our built-in instructions (`AGENTS.md` and `CONTRIBUTING.md`), works in your copy of this repository (never writing anything into your game files), automatically claims an open dark square nobody else is working on, inspects tiny file headers read-only, writes the new Windows 11 code and tests, and opens a Pull Request. |
 
 <br>
 
@@ -235,7 +235,7 @@ Source code is split into eight isolated static library modules so multiple cont
 
 ```powershell
 cmake -B build -A x64
-cmake --build build --config Release -- /m:1 /nr:false
+cmake --build build --config Release -- -m:1 -nr:false
 ```
 
 <br>

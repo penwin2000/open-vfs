@@ -4,7 +4,7 @@ This repository builds **`open-vfs.exe`**, a clean-room **C++20** and **DirectX 
 
 When a contributor opens any AI coding harness (such as Claude Code, Codex, Cursor, Windsurf, Gemini CLI, GitHub Copilot, or Antigravity) and says:
 
-> `Set up https://github.com/penwin2000/open-vfs and start contributing`
+> `Set up https://github.com/penwin2000/open-vfs, ask me for my local game folder first, and start contributing`
 
 follow the automated **Pick -> Claim & Verify -> Branch -> PR** workflow below (synchronized with `.agent/skills/contribute/SKILL.md`).
 
@@ -12,8 +12,8 @@ follow the automated **Pick -> Claim & Verify -> Branch -> PR** workflow below (
 
 ## Non-Negotiable Privacy & Clean-Room Guardrails
 
-1. **Never copy or commit proprietary files.** The parent workspace holds raw local archives (`*.rpf`, `*.ttpf`, `*.xvd`, `*.bin`, `*.dll`, `*.exe`, `*.pri`, `*.xml`, `*.config`, `*.png`, `*.alignmentchunk`). Keep all repository operations strictly inside `.open-vfs-repo/`.
-2. **Read-only header inspection only.** You may inspect small binary header slices (e.g., first 64–4096 bytes) of local archives in the parent directory strictly read-only to confirm field offsets, magic constants, flags, and 16-byte alignment invariants. Never copy raw bytes, payloads, hash tables, or strings into the repository.
+1. **Never copy or commit proprietary files.** The user's local game data folder (`<data_dir>`) holds raw local archives (`*.rpf`, `*.ttpf`, `*.xvd`, `*.bin`, `*.dll`, `*.exe`, `*.pri`, `*.xml`, `*.config`, `*.png`, `*.alignmentchunk`). Keep all repository operations inside the repository checkout chosen in Step 1, and treat `<data_dir>` as strictly read-only.
+2. **Read-only header inspection only.** You may inspect small binary header slices (e.g., first 64–4096 bytes) of local archives in `<data_dir>` strictly read-only to confirm field offsets, magic constants, flags, and 16-byte alignment invariants. Never copy raw bytes, payloads, hash tables, or strings into the repository.
 3. **Zero forbidden identifiers.** Never mention any commercial game title, franchise, studio, external reference repository, or local dump filename/path in any source file, comment, test, SVG, commit message, GitHub issue, or pull request.
 4. **Module isolation.** Touch **only** the target module directory (`src/<module>/`) and its corresponding unit test (`tests/test_<module>.cpp`) so concurrent contributors never collide. External fork PRs must never modify `.github/`, `tools/`, `.agent/`, `CMakeLists.txt`, `AGENTS.md`, or `.coderabbit.yaml`.
 5. **Synthetic-buffer tests only.** Every unit test must construct small in-memory synthetic byte arrays—never read from the user's local archive directory.
@@ -26,18 +26,18 @@ follow the automated **Pick -> Claim & Verify -> Branch -> PR** workflow below (
 Execute these steps in order, starting with Step 0:
 
 ### 0. Ask the User for Their Local Game Data Folder (Always)
-Before cloning, picking a stub, or running any other command, **always ask the user in chat** for the absolute path to their local game data folder (the folder holding their own archive files), then **wait for their answer**.
+Before picking a stub, writing code, or running any other repository command, **always ask the user in chat** for the absolute path to their local game data folder (the folder holding their own archive files), then **wait for their answer**.
 - Ask even when the current working directory already looks like a data folder. In that case, offer it as the suggested answer, but still wait for the user to confirm it.
 - Never search the disk for archives, guess the location, or infer it from other folders, recent files, or harness history.
 - Once the user answers, confirm read-only that the path exists and is a directory. Count the container files by extension (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`, `*.pri`) and report the counts to the user. If the folder is missing or holds no container files, say so and ask again.
 - If the user says they have no game folder or would rather not share it, continue in **no-data mode**: skip Step 5 and pick only stubs outside `rpf9`, `rds5`, and `xvd`, whose parsers require header inspection.
 - The confirmed path (`<data_dir>`) is local-only knowledge. Never write it, or any file name inside it, into the repository, a commit, an issue, or a pull request.
 
-### 1. Bootstrap `.open-vfs-repo/` & Detect Permissions
-- Use `<data_dir>/.open-vfs-repo/` as the repository folder (in no-data mode, use `.open-vfs-repo/` in the current workspace).
-- If `.open-vfs-repo/.git` does not exist there, clone `https://github.com/penwin2000/open-vfs.git` into it.
-- Otherwise, `git -C .open-vfs-repo checkout main` and `git -C .open-vfs-repo pull --ff-only origin main`.
-- Run all subsequent repository commands with `.open-vfs-repo/` as the working directory.
+### 1. Use the Current Checkout & Detect Permissions
+- **Already cloned?** If the current workspace is already a checkout of `penwin2000/open-vfs`, use it as the repository root. Do **not** clone again into `<data_dir>` or anywhere else; refresh it in place with `git checkout main` and `git pull --ff-only origin main`.
+- **Not a checkout yet?** Only if the workspace is not a checkout (for example, the user opened their tool directly inside `<data_dir>`), clone `https://github.com/penwin2000/open-vfs.git` into a `.open-vfs-repo/` subfolder of the current workspace (or, if `.open-vfs-repo/.git` already exists, `git -C .open-vfs-repo checkout main` and `git -C .open-vfs-repo pull --ff-only origin main`) and use `.open-vfs-repo/` as the repository root.
+- Treat `<data_dir>` strictly read-only: zero writes, renames, or deletions of anything it contains. The `.open-vfs-repo/` checkout above is the only folder an agent may ever create beneath it.
+- Run all subsequent repository commands from the repository root.
 - Verify GitHub CLI authentication and check repository permissions:
   ```powershell
   gh auth status
@@ -103,7 +103,7 @@ git checkout -b feat/m<num>-<module>-<symbol>
 ```
 
 ### 5. Read-Only Local Header Inspection (When Applicable)
-For container parsers (`vfs_core`, `rpf9`, `rds5`, `xvd`) or asset decoders (`render`, `audio`, `world_vm`), inspect matching archive headers (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`) in the user-confirmed `<data_dir>` from Step 0 **read-only** first (skip this step in no-data mode) to validate magic values (`0x52504639`, `0x52445335`, `0x1DD3014E` / `"msft-xvd"` at offset `0x000` or `0x200`), struct field widths, endianness, flags, and 16-byte alignment constraints. Never write into the parent workspace or copy bytes or local filenames into `.open-vfs-repo/`.
+For container parsers (`vfs_core`, `rpf9`, `rds5`, `xvd`) or asset decoders (`render`, `audio`, `world_vm`), inspect matching archive headers (`*.rpf`, `*.ttpf`, `*.rds`, `*.xvd`, `*.alignmentchunk`) in the user-confirmed `<data_dir>` from Step 0 **read-only** first (skip this step in no-data mode) to validate magic values (`0x52504639`, `0x52445335`, `0x1DD3014E` / `"msft-xvd"` at offset `0x000` or `0x200`), struct field widths, endianness, flags, and 16-byte alignment constraints. Never write into `<data_dir>` or copy bytes or local filenames into the repository.
 
 ### 6. Implement Clean-Room C++20 & Synthetic Unit Tests
 - Implement `<symbol>` in `src/<module>/` using clean, bounds-checked C++20 (`std::span`, `open_vfs::Status`, zero compiler warnings under `/W4 /permissive-`, zero raw pointer overflows).
@@ -113,10 +113,10 @@ For container parsers (`vfs_core`, `rpf9`, `rds5`, `xvd`) or asset decoders (`re
 ### 7. Build & Verify Locally
 ```powershell
 cmake -B build -A x64
-cmake --build build --config Release -- /m:1 /nr:false
+cmake --build build --config Release -- -m:1 -nr:false
 ctest --test-dir build -C Release --output-on-failure
 ```
-> **Note (Windows MSBuild):** Always pass `-- /m:1 /nr:false` so MSBuild does not leave persistent background worker nodes hanging in automated or sandboxed shells.
+> **Note (Windows MSBuild):** Always pass `-- -m:1 -nr:false` so MSBuild does not leave persistent background worker nodes hanging in automated or sandboxed shells.
 > **Windows Application Control fallback:** If WDAC / Smart App Control blocks executing locally built unsigned test binaries during `ctest`, do **not** attempt to circumvent OS policy. Verify zero compiler warnings locally under `/W4 /permissive-`, open the PR, and confirm all CTest suites and CLI smoke tests pass in GitHub Actions CI via `gh pr checks --watch`.
 
 When Python is available locally, confirm `<symbol>` shows as `"status": "impl"` and run the local PR Guard check:

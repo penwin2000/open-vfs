@@ -17,7 +17,7 @@ Brief plain-English description of the clean-room C++20 change in this pull requ
 
 ## Clean-Room & Verification Checklist
 
-- [ ] `cmake --build build --config Release -- /m:1 /nr:false` compiles `open-vfs.exe` and tests with zero errors and zero warnings
+- [ ] `cmake --build build --config Release -- -m:1 -nr:false` compiles `open-vfs.exe` and tests with zero errors and zero warnings
 - [ ] `ctest --test-dir build -C Release --output-on-failure` passes all synthetic module suites (or verified in CI if local security policy restricts unsigned binaries)
 - [ ] Synthetic in-memory unit test coverage added or updated in `tests/test_<module>.cpp`
 - [ ] `python tools/progress.py --scan` reflects the updated `OPEN_VFS_IMPL` count
