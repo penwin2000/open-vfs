@@ -4,6 +4,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -179,7 +180,7 @@ int main() {
     std::array<uint8_t, 16> scratch{};
     std::size_t bytes_read = 0;
     OVF_EXPECT(read_aligned_chunk(stream, 5, scratch, bytes_read) == Status::AlignmentError);
-    OVF_EXPECT(read_aligned_chunk(stream, 16, scratch, bytes_read) == Status::NotImplemented);
+    OVF_EXPECT(read_aligned_chunk(stream, 16, scratch, bytes_read) == Status::InvalidArgument);
 
     // 7. enumerate_mounted_entries over in-memory synthetic registries
     {
@@ -328,6 +329,77 @@ int main() {
         // A valid handle still honors the read alignment contract
         OVF_EXPECT(open_virtual_stream(host_registry, "/game/pack_0.rpf", handle) == Status::Ok);
         OVF_EXPECT(read_aligned_chunk(handle, 8, scratch, bytes_read) == Status::AlignmentError);
+    }
+
+    // 9. Aligned stream reads use only a generated synthetic backing file.
+    {
+        std::vector<uint8_t> contents(80);
+        for (std::size_t i = 0; i < contents.size(); ++i) {
+            contents[i] = static_cast<uint8_t>(i);
+        }
+        const auto file_path = temp_dir / "aligned_stream.rpf";
+        OVF_EXPECT(write_synthetic_file(file_path, contents));
+        MountRegistry mounted;
+        OVF_EXPECT(mount_directory(mounted, "/synthetic", temp_dir) == Status::Ok);
+        VirtualStreamHandle handle;
+        OVF_EXPECT(open_virtual_stream(mounted, "/synthetic/aligned_stream.rpf", handle) == Status::Ok);
+        std::array<uint8_t, 32> buffer{};
+        std::size_t read = 999;
+        OVF_EXPECT(read_aligned_chunk(handle, 16, buffer, read) == Status::Ok);
+        OVF_EXPECT(read == buffer.size());
+        for (std::size_t i = 0; i < read; ++i) {
+            OVF_EXPECT(buffer[i] == contents[16 + i]);
+        }
+
+        // A substream's base is included, and its end limits the write.
+        handle.offset = 16;
+        handle.size = 21;
+        buffer.fill(0xFF);
+        OVF_EXPECT(read_aligned_chunk(handle, 16, buffer, read) == Status::Ok);
+        OVF_EXPECT(read == 5u);
+        for (std::size_t i = 0; i < buffer.size(); ++i) {
+            OVF_EXPECT(buffer[i] == (i < 5 ? contents[32 + i] : 0xFF));
+        }
+        OVF_EXPECT(read_aligned_chunk(handle, 0, std::span<uint8_t>(buffer).first(3), read) == Status::Ok);
+        OVF_EXPECT(read == 3u && buffer[0] == 16u && buffer[2] == 18u);
+        OVF_EXPECT(read_aligned_chunk(handle, 0, {}, read) == Status::Ok && read == 0u);
+        OVF_EXPECT(read_aligned_chunk(handle, 32, buffer, read) == Status::OutOfBounds && read == 0u);
+        handle.size = 32;
+        OVF_EXPECT(read_aligned_chunk(handle, 32, buffer, read) == Status::Ok && read == 0u);
+        handle.size = 0;
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::Ok && read == 0u);
+
+        handle.size = 32;
+        OVF_EXPECT(read_aligned_chunk(handle, 1, buffer, read) == Status::AlignmentError && read == 0u);
+        handle.offset = 1;
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::AlignmentError);
+        handle.offset = 0;
+        handle.valid = false;
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::InvalidArgument);
+        handle.valid = true;
+        handle.host_path.clear();
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::InvalidArgument);
+        handle.host_path = temp_dir / "absent_stream.rpf";
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::IoError && read == 0u);
+        handle.host_path = file_path;
+
+        handle.offset = UINT64_MAX - 15;
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::OutOfBounds);
+        handle.offset = 16;
+        handle.size = UINT64_MAX;
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::OutOfBounds);
+        handle.offset = 0;
+        handle.size = static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)()) + 1;
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::OutOfBounds);
+        handle.size = 80;
+        OVF_EXPECT(read_aligned_chunk(handle, UINT64_MAX - 15, buffer, read) == Status::OutOfBounds);
+
+        // Truncation after opening is an I/O error, with actual progress reported.
+        OVF_EXPECT(write_synthetic_file(file_path, std::vector<uint8_t>{10, 20, 30}));
+        buffer.fill(0xFF);
+        OVF_EXPECT(read_aligned_chunk(handle, 0, buffer, read) == Status::IoError);
+        OVF_EXPECT(read == 3u && buffer[0] == 10u && buffer[2] == 30u && buffer[3] == 0xFF);
+        OVF_EXPECT(read_aligned_chunk(handle, 16, buffer, read) == Status::IoError && read == 0u);
     }
 
     std::filesystem::remove_all(temp_dir, ec);
