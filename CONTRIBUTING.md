@@ -1,6 +1,48 @@
 # Contributing to `open-vfs`
 
-Thank you for helping build **`open-vfs`**, a clean-room C++20 and DirectX 12 native Windows 11 runtime. This project is structured so multiple humans and coding agents can implement subsystems concurrently without merge conflicts or legal/privacy exposure.
+Thank you for helping build **`open-vfs`**, a clean-room **C++20** and **DirectX 12** native Windows 11 desktop runtime. This repository is structured so humans and coding agents can implement subsystems concurrently without merge conflicts or legal/privacy exposure.
+
+Before starting, review the core project references:
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — Subsystem dependency DAG, verified binary layouts, and alignment invariants.
+- **[AGENTS.md](./AGENTS.md)** — Autonomous contributor guardrails and Issue -> Branch -> Milestone -> PR operating manual.
+- **[.agent/skills/contribute/SKILL.md](./.agent/skills/contribute/SKILL.md)** — Automated end-to-end contribution skill for coding agents.
+
+---
+
+## Quick Start
+
+### Human Developers
+1. **Fork & clone** `https://github.com/penwin2000/open-vfs.git` (or clone directly if you have collaborator write access).
+2. **Pick an unclaimed stub** via `python tools/progress.py --scan`, `gh issue list --repo penwin2000/open-vfs --state open`, and `gh pr list --repo penwin2000/open-vfs --state open`.
+3. **Open an issue** targeting the matching milestone (`M1`–`M4`) and create a branch named `feat/m<num>-<module>-<symbol>` off up-to-date `main`.
+4. **Implement & test** strictly inside `src/<module>/` and `tests/test_<module>.cpp`, flipping `OPEN_VFS_STUB` -> `OPEN_VFS_IMPL`.
+5. **Build & verify on Windows** (always pass `-- /m:1 /nr:false` to MSBuild so background worker nodes do not hang):
+   ```powershell
+   cmake -B build -A x64
+   cmake --build build --config Release -- /m:1 /nr:false
+   ctest --test-dir build -C Release --output-on-failure
+   ```
+6. **Open a Pull Request** targeting `main` using [.github/pull_request_template.md](./.github/pull_request_template.md) and wait for both **Build, Test & Progress Map** and **PR Guard** checks to pass.
+
+### AI Agents
+- Follow **[AGENTS.md](./AGENTS.md)** and **[.agent/skills/contribute/SKILL.md](./.agent/skills/contribute/SKILL.md)** strictly.
+- When working inside a local archive directory, keep all git operations isolated inside `.open-vfs-repo/`, inspect local container headers strictly **read-only**, and never copy bytes, filenames, or local paths into the repository.
+- External contributor agents without write access must fork `penwin2000/open-vfs`, push feature branches to their `fork` remote, open cross-repo PRs targeting `main`, and hand off once CI checks are green.
+
+---
+
+## Fork-and-PR & Automated Guard Rules
+
+Every pull request targeting `main` is automatically verified by two workflows:
+1. **`PR Guard`** (`.github/workflows/pr-guard.yml` + `tools/pr_guard.py`) — Zero-secret, read-only diff bouncer that rejects:
+   - Binary/non-text blobs, forbidden archive/binary extensions (`.exe`, `.dll`, `.lib`, `.obj`, `.rpf`, `.ttpf`, `.xvd`, `.pri`, `.pak`, `.bin`, `.zip`, `.7z`, `.rar`), or any single added file over **512 KiB**.
+   - Local OS absolute path leaks in `src/`, `include/`, `app/`, `tests/`, and `docs/`.
+   - Disallowed OS process execution or networking APIs inside `src/`, `include/`, `app/`, and `tests/`.
+   - Changes under `src/` that omit corresponding synthetic unit test updates under `tests/`.
+   - **External fork control-file edits:** External fork PRs touching `.github/`, `tools/`, `.agent/`, `CMakeLists.txt`, `AGENTS.md`, or `.coderabbit.yaml` fail with a mandatory manual maintainer audit banner.
+2. **`Build, Test & Progress Map`** (`.github/workflows/progress.yml`) — Compiles `open-vfs.exe` (C++20 `/W4 /permissive-`), runs all synthetic CTest suites, and smoke-tests the CLI on `windows-latest`.
+
+> **Fork workflow tip:** Keep external fork PRs scoped strictly to `src/<module>/` and `tests/test_<module>.cpp`. Never modify `.github/`, `tools/`, `.agent/`, `CMakeLists.txt`, `AGENTS.md`, or `.coderabbit.yaml` unless specifically coordinated with a maintainer.
 
 ---
 
@@ -8,10 +50,11 @@ Thank you for helping build **`open-vfs`**, a clean-room C++20 and DirectX 12 na
 
 | Rule | Requirement |
 | :--- | :--- |
-| **No Proprietary Data** | Never commit, copy, or paste local dump files (`*.rpf`, `*.ttpf`, `*.xvd`, `*.bin`, `*.dll`, `*.exe`, `*.pri`, `*.xml`, `*.config`, `*.png`, `*.alignmentchunk`). |
-| **No Identifiers** | Never mention any commercial game title, franchise, studio, local dump filename, or external reference repository in code, comments, SVGs, commits, issues, or PRs. |
-| **Synthetic Tests Only** | All CTest unit tests under `tests/` must construct small in-memory synthetic buffers—never load files from a local dump. |
-| **Read-Only Inspection** | Local archive headers may be inspected read-only to understand structural layouts and alignment; all implementations must be original clean-room C++20. |
+| **No Proprietary or Binary Data** | Never commit, copy, or paste local dump files (`*.rpf`, `*.ttpf`, `*.xvd`, `*.bin`, `*.dll`, `*.exe`, `*.pri`, `*.pak`, `*.zip`, `*.7z`, `*.rar`, `*.alignmentchunk`, or binary blobs). |
+| **Zero Forbidden Identifiers** | Never mention any commercial game title, franchise, studio, local dump filename/path, or external reference repository in code, comments, docs, SVGs, commits, issues, or PRs. |
+| **Synthetic Tests Only** | All CTest unit tests under `tests/` must construct small in-memory synthetic byte arrays—never read from a local archive directory. |
+| **Read-Only Header Inspection** | Local archive headers may be inspected read-only to confirm struct offsets, magic values, flags, and alignment invariants; all implementations must be original clean-room C++20. |
+| **Zero Suspicious OS/Network APIs** | Runtime modules and tests must never invoke shell/process execution or networking APIs. |
 
 ---
 
@@ -45,49 +88,46 @@ When you implement a stub, flip its tag from `OPEN_VFS_STUB` to `OPEN_VFS_IMPL`.
 
 ---
 
-## Issue -> Branch -> Milestone -> PR Workflow
-
-1. **Discover an unclaimed stub** using `python tools/progress.py --scan`, `gh issue list`, and `gh pr list`.
-2. **Open a GitHub Issue** assigned to the matching Milestone (`M1`–`M4`) using `.github/ISSUE_TEMPLATE/task.md`.
-3. **Create a dedicated branch** from `main` named `feat/m<num>-<module>-<symbol>` (lowercase, hyphens for separators).
-4. **Implement & Test** your function strictly within `src/<module>/` and `tests/test_<module>.cpp`.
-5. **Verify locally** that `open-vfs.exe` compiles cleanly, `ctest --output-on-failure` passes, and `git status` shows zero ignored/dump files.
-6. **Open a Pull Request** referencing `Closes #<issue>` and complete the PR checklist.
+## Issue -> Branch -> Milestone -> PR Walkthrough
 
 <details>
-<summary><strong>Step-by-Step CLI Walkthrough (GitHub CLI + CMake + CTest)</strong></summary>
+<summary><strong>Step-by-Step CLI Commands (GitHub CLI + CMake + CTest)</strong></summary>
 
 ```powershell
 # 1. Inspect open work and available stubs
 python tools/progress.py --scan
-gh issue list --repo penwin2000/open-vfs --state open
-gh pr list --repo penwin2000/open-vfs --state open
+gh issue list --repo penwin2000/open-vfs --state open --limit 100
+gh pr list --repo penwin2000/open-vfs --state open --limit 100
 
 # 2. Claim a stub by opening a milestone-assigned issue
 gh issue create --repo penwin2000/open-vfs `
   --title "[rpf9] Implement parse_rpf9_toc_table" `
   --milestone "M1: VFS & Containers" `
-  --body "Implement clean-room TOC table parser and synthetic buffer tests for RPF9."
+  --body "Clean-room C++20 implementation with synthetic-buffer CTest coverage."
 
 # 3. Branch from latest main
 git checkout main
-git pull origin main
+git pull --ff-only origin main
 git checkout -b feat/m1-rpf9-parse-rpf9-toc-table
 
-# 4. Build open-vfs.exe and verify CTest
-cmake -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release --parallel
+# 4. Build open-vfs.exe and verify CTest (Windows MSBuild flags required)
+cmake -B build -A x64
+cmake --build build --config Release -- /m:1 /nr:false
 ctest --test-dir build -C Release --output-on-failure
 
-# 5. Confirm macro status update and clean git tree
+# 5. Confirm macro status, PR Guard checks, and clean git tree
 python tools/progress.py --scan
+python tools/pr_guard.py --base origin/main --head HEAD
 git status
 
-# 6. Push and open a PR linked to the issue
+# 6. Push (to 'fork' for external contributors or 'origin' for collaborators) and open a PR
 git push -u origin feat/m1-rpf9-parse-rpf9-toc-table
 gh pr create --repo penwin2000/open-vfs `
+  --base main `
   --title "feat(rpf9): implement parse_rpf9_toc_table" `
-  --body "Closes #<issue_number>`n`nImplements clean-room RPF9 TOC table parsing with synthetic CTest coverage."
+  --body "Closes #<issue_number>`n`nClean-room C++20 implementation with synthetic-buffer CTest coverage."
 ```
+
+> **Windows Application Control note:** If local security policy blocks executing unsigned CTest binaries on your machine, confirm zero compiler warnings locally under `/W4 /permissive-`, open the pull request, and verify all CTest suites pass in GitHub Actions via `gh pr checks --watch`.
 
 </details>

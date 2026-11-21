@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+
+reviews:
+  profile: "quiet"
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  commit_status: true
+  high_level_summary_instructions: |
+    Start every pull request review with a short, non-technical maintainer box using exactly these three sections:
+
+    - **Plain-English Summary:** Write 2 simple sentences explaining what this change does with zero technical jargon.
+    - **Safety & Clean-Room Check:** Explicitly confirm whether any suspicious OS/network calls, binary or archive data, local machine paths, or external/private references were spotted.
+    - **Maintainer Verdict:** End with a bold traffic-light line: **🟢 SAFE TO MERGE** or **🔴 DO NOT MERGE** (plus 1 plain-English sentence explaining why if red).
+  path_instructions:
+    - path: "src/**"
+      instructions: |
+        Verify strict clean-room C++20 safety and architecture compliance:
+        1. Bounds checks on every `std::span` access, buffer slice, and container index before reading or writing.
+        2. Integer overflow and underflow safety on all offsets, sizes, entry counts, shifts, and pointer/offset arithmetic.
+        3. Alignment math (16-byte alignment, 256-byte chunk alignment, 4 KiB page alignment) strictly matches `ARCHITECTURE.md`.
+        4. Every module function adheres to the `OPEN_VFS_IMPL` / `OPEN_VFS_STUB` macro conventions from `include/open_vfs/macros.hpp` and returns `open_vfs::Status` cleanly.
+        5. Flag any suspicious OS/network calls, local machine paths, or private/commercial identifiers immediately.
+    - path: "include/**"
+      instructions: |
+        Verify public header contracts and safety invariants:
+        1. Ensure declared types, constants, bitfields, and span interfaces enforce bounds checks, integer overflow safety, and alignment math consistent with `ARCHITECTURE.md`.
+        2. Confirm `OPEN_VFS_IMPL` / `OPEN_VFS_STUB` macro conventions and `open_vfs::Status` error codes remain consistent and clean-room.
+        3. Flag any suspicious OS/network APIs, local machine paths, or private/commercial identifiers immediately.
