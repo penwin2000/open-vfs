@@ -1,5 +1,6 @@
 #include "rds5.hpp"
 
+#include <limits>
 #include <open_vfs/macros.hpp>
 #include "../vfs_core/vfs_core.hpp"
 
@@ -67,14 +68,50 @@ Status parse_rds5_descriptor(std::span<const uint8_t> data,
     return Status::Ok;
 }
 
-OPEN_VFS_STUB
+OPEN_VFS_IMPL
 Status parse_rds5_descriptor_table(std::span<const uint8_t> container_bytes,
                                    const Rds5Header& header,
                                    std::vector<Rds5ResourceDescriptor>& out_descriptors) {
-    (void)container_bytes;
-    (void)header;
     out_descriptors.clear();
-    return Status::NotImplemented;
+
+    if (!validate_rds5_magic(header.magic)) {
+        return Status::InvalidMagic;
+    }
+    if (!vfs_core::is_aligned_16(header.descriptor_table_offset)) {
+        return Status::AlignmentError;
+    }
+
+    const uint64_t container_size = static_cast<uint64_t>(container_bytes.size());
+    if (header.descriptor_table_offset > container_size) {
+        return Status::OutOfBounds;
+    }
+
+    const uint64_t descriptor_count = static_cast<uint64_t>(header.descriptor_count);
+    constexpr uint64_t kDescriptorSize = static_cast<uint64_t>(kRds5DescriptorSize);
+    if (descriptor_count > (std::numeric_limits<uint64_t>::max() / kDescriptorSize)) {
+        return Status::OutOfBounds;
+    }
+
+    const uint64_t table_size = descriptor_count * kDescriptorSize;
+    if (table_size > container_size - header.descriptor_table_offset) {
+        return Status::OutOfBounds;
+    }
+
+    out_descriptors.reserve(static_cast<std::size_t>(descriptor_count));
+    std::size_t cursor = static_cast<std::size_t>(header.descriptor_table_offset);
+    for (uint32_t i = 0; i < header.descriptor_count; ++i) {
+        Rds5ResourceDescriptor descriptor{};
+        const Status status = parse_rds5_descriptor(
+            container_bytes.subspan(cursor, kRds5DescriptorSize), descriptor);
+        if (status != Status::Ok) {
+            out_descriptors.clear();
+            return status;
+        }
+        out_descriptors.push_back(descriptor);
+        cursor += kRds5DescriptorSize;
+    }
+
+    return Status::Ok;
 }
 
 OPEN_VFS_STUB
