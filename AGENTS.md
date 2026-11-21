@@ -73,10 +73,11 @@ For container parsers (`vfs_core`, `rpf9`, `rds5`, `xvd`) or asset decoders (`re
 ### 7. Build & Verify Locally
 ```powershell
 cmake -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release --parallel
+cmake --build build --config Release -- /m:1 /nr:false
 ctest --test-dir build -C Release --output-on-failure
 python tools/progress.py --scan
 ```
+> **Note (Windows MSBuild):** Pass `-- /nr:false` (optionally with `/m:1`) so MSBuild does not leave persistent background worker nodes hanging in automated or sandboxed shells.
 Confirm:
 - `open-vfs.exe` compiles cleanly with zero errors.
 - All CTest suites pass.
