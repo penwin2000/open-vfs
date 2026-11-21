@@ -11,9 +11,9 @@
   </defs>
   <rect x="0.5" y="0.5" width="879" height="523" rx="12" fill="url(#bgGrad)" stroke="#30363d" stroke-width="1"/>
   <text x="24" y="34" fill="#f0f6fc" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700">open-vfs Porting Tile Map</text>
-  <text x="856" y="34" text-anchor="end" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace" font-size="13"><tspan fill="#3fb950" font-weight="700">30</tspan> / 78 functions (38.5%)</text>
+  <text x="856" y="34" text-anchor="end" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace" font-size="13"><tspan fill="#3fb950" font-weight="700">31</tspan> / 78 functions (39.7%)</text>
   <rect x="24" y="58" width="832" height="8" rx="4" fill="#21262d"/>
-  <rect x="24" y="58" width="320" height="8" rx="4" fill="url(#barGrad)"/>
+  <rect x="24" y="58" width="330" height="8" rx="4" fill="url(#barGrad)"/>
   <rect x="24" y="96" width="832" height="40" rx="8" fill="#161b22" stroke="#262c36" stroke-width="1"/>
   <rect x="36" y="107" width="28" height="18" rx="4" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
   <text x="50" y="119.5" text-anchor="middle" fill="#79c0ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700">M1</text>
@@ -35,17 +35,17 @@
   <rect x="36" y="155" width="28" height="18" rx="4" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
   <text x="50" y="167.5" text-anchor="middle" fill="#79c0ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700">M1</text>
   <text x="74" y="168.5" fill="#e6edf3" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="13" font-weight="600">rpf9</text>
-  <rect x="200" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::validate_rpf9_magic [IMPL] (src/rpf9/rpf9.cpp:8)</title></rect>
-  <rect x="220" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::parse_rpf9_header [IMPL] (src/rpf9/rpf9.cpp:13)</title></rect>
-  <rect x="240" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::parse_rpf9_toc_entry [IMPL] (src/rpf9/rpf9.cpp:45)</title></rect>
-  <rect x="260" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::parse_rpf9_toc_table [STUB] (src/rpf9/rpf9.cpp:68)</title></rect>
-  <rect x="280" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::resolve_rpf9_name_table [STUB] (src/rpf9/rpf9.cpp:78)</title></rect>
-  <rect x="300" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::locate_rpf9_entry_by_path [STUB] (src/rpf9/rpf9.cpp:88)</title></rect>
-  <rect x="320" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::parse_rpf9_block_header [STUB] (src/rpf9/rpf9.cpp:100)</title></rect>
-  <rect x="340" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::decompress_rpf9_block [STUB] (src/rpf9/rpf9.cpp:108)</title></rect>
-  <rect x="360" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::decrypt_rpf9_payload [STUB] (src/rpf9/rpf9.cpp:118)</title></rect>
-  <rect x="380" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::extract_rpf9_entry_bytes [STUB] (src/rpf9/rpf9.cpp:126)</title></rect>
-  <text x="842" y="168.5" text-anchor="end" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="12"><tspan fill="#e6edf3" font-weight="600">3/10</tspan> (30%)</text>
+  <rect x="200" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::validate_rpf9_magic [IMPL] (src/rpf9/rpf9.cpp:9)</title></rect>
+  <rect x="220" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::parse_rpf9_header [IMPL] (src/rpf9/rpf9.cpp:14)</title></rect>
+  <rect x="240" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::parse_rpf9_toc_entry [IMPL] (src/rpf9/rpf9.cpp:46)</title></rect>
+  <rect x="260" y="156" width="16" height="16" rx="3" fill="#2ea043" stroke="#3fb950" stroke-width="1"><title>rpf9::parse_rpf9_toc_table [IMPL] (src/rpf9/rpf9.cpp:69)</title></rect>
+  <rect x="280" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::resolve_rpf9_name_table [STUB] (src/rpf9/rpf9.cpp:115)</title></rect>
+  <rect x="300" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::locate_rpf9_entry_by_path [STUB] (src/rpf9/rpf9.cpp:125)</title></rect>
+  <rect x="320" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::parse_rpf9_block_header [STUB] (src/rpf9/rpf9.cpp:137)</title></rect>
+  <rect x="340" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::decompress_rpf9_block [STUB] (src/rpf9/rpf9.cpp:145)</title></rect>
+  <rect x="360" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::decrypt_rpf9_payload [STUB] (src/rpf9/rpf9.cpp:155)</title></rect>
+  <rect x="380" y="156" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>rpf9::extract_rpf9_entry_bytes [STUB] (src/rpf9/rpf9.cpp:163)</title></rect>
+  <text x="842" y="168.5" text-anchor="end" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="12"><tspan fill="#e6edf3" font-weight="600">4/10</tspan> (40%)</text>
   <rect x="24" y="192" width="832" height="40" rx="8" fill="#161b22" stroke="#262c36" stroke-width="1"/>
   <rect x="36" y="203" width="28" height="18" rx="4" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
   <text x="50" y="215.5" text-anchor="middle" fill="#79c0ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700">M1</text>
@@ -133,8 +133,8 @@
   <rect x="380" y="444" width="16" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"><title>world_vm::dispatch_native_call [STUB] (src/world_vm/world_vm.cpp:109)</title></rect>
   <text x="842" y="456.5" text-anchor="end" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="12"><tspan fill="#e6edf3" font-weight="600">4/10</tspan> (40%)</text>
   <rect x="24" y="492" width="12" height="12" rx="2.5" fill="#2ea043" stroke="#3fb950" stroke-width="1"/>
-  <text x="42" y="502" fill="#8b949e" font-family="ui-sans-serif, Segoe UI, Arial, sans-serif" font-size="11">OPEN_VFS_IMPL (30)</text>
+  <text x="42" y="502" fill="#8b949e" font-family="ui-sans-serif, Segoe UI, Arial, sans-serif" font-size="11">OPEN_VFS_IMPL (31)</text>
   <rect x="174" y="492" width="12" height="12" rx="2.5" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-  <text x="192" y="502" fill="#8b949e" font-family="ui-sans-serif, Segoe UI, Arial, sans-serif" font-size="11">OPEN_VFS_STUB (48)</text>
+  <text x="192" y="502" fill="#8b949e" font-family="ui-sans-serif, Segoe UI, Arial, sans-serif" font-size="11">OPEN_VFS_STUB (47)</text>
   <text x="856" y="502" text-anchor="end" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="11">Generated by tools/progress.py</text>
 </svg>
