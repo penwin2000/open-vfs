@@ -172,9 +172,10 @@ int main() {
         OVF_EXPECT(observed.rds5_count == 56u);
     }
 
-    // 6. Pending stubs return expected clean statuses
+    // 6. Unknown stream paths fail cleanly; pending read stub returns expected statuses
     VirtualStreamHandle stream{};
-    OVF_EXPECT(open_virtual_stream(registry, "/data/test", stream) == Status::NotImplemented);
+    OVF_EXPECT(open_virtual_stream(registry, "/data/test", stream) == Status::NotFound);
+    OVF_EXPECT(!stream.valid);
     std::array<uint8_t, 16> scratch{};
     std::size_t bytes_read = 0;
     OVF_EXPECT(read_aligned_chunk(stream, 5, scratch, bytes_read) == Status::AlignmentError);
@@ -275,6 +276,58 @@ int main() {
         OVF_EXPECT(enumerate_mounted_entries(host_registry, "/game", listed) == Status::Ok);
         const std::vector<std::string> expected_host{"/game/pack_0.rpf", "/game/stream_0.ttpf"};
         OVF_EXPECT(listed == expected_host);
+
+        // 8. open_virtual_stream over the same synthetic registries
+        VirtualStreamHandle handle{};
+
+        // Archive in the covering mount opens at offset 0 with its recorded size
+        OVF_EXPECT(open_virtual_stream(synth, "/data/pack_b.rpf", handle) == Status::Ok);
+        OVF_EXPECT(handle.valid);
+        OVF_EXPECT(handle.mount_index == 0u && handle.archive_index == 0u);
+        OVF_EXPECT(handle.offset == 0u && handle.size == 64u);
+        OVF_EXPECT(handle.host_path.empty());
+
+        // Overlapping listing: /data/pack_a.rpf is exposed by /data, not by /data/update
+        OVF_EXPECT(open_virtual_stream(synth, "/data/pack_a.rpf", handle) == Status::Ok);
+        OVF_EXPECT(handle.mount_index == 0u && handle.archive_index == 1u);
+
+        // Nested mount wins for paths beneath it; unnormalized input resolves identically
+        OVF_EXPECT(open_virtual_stream(synth, "/data/update/patch_0.rpf", handle) == Status::Ok);
+        OVF_EXPECT(handle.mount_index == 1u && handle.archive_index == 0u);
+        OVF_EXPECT(open_virtual_stream(synth, "data\\update\\.\\patch_0.rpf", handle) == Status::Ok);
+        OVF_EXPECT(handle.mount_index == 1u && handle.archive_index == 0u);
+
+        // Unnormalized archive virtual roots still match
+        OVF_EXPECT(open_virtual_stream(synth, "/volume/vol_00.xvd", handle) == Status::Ok);
+        OVF_EXPECT(handle.mount_index == 2u && handle.archive_index == 0u);
+
+        // Mount prefixes, directories, root, and unknown paths are not streams;
+        // a previously valid handle is reset on failure
+        OVF_EXPECT(handle.valid);
+        OVF_EXPECT(open_virtual_stream(synth, "/data", handle) == Status::NotFound);
+        OVF_EXPECT(!handle.valid && handle.size == 0u);
+        OVF_EXPECT(open_virtual_stream(synth, "/data/update", handle) == Status::NotFound);
+        OVF_EXPECT(open_virtual_stream(synth, "/", handle) == Status::NotFound);
+        OVF_EXPECT(open_virtual_stream(synth, "", handle) == Status::NotFound);
+        OVF_EXPECT(open_virtual_stream(synth, "/data/pack_c.rpf", handle) == Status::NotFound);
+        OVF_EXPECT(open_virtual_stream(synth, "/elsewhere/pack_a.rpf", handle) == Status::NotFound);
+        OVF_EXPECT(open_virtual_stream(synth, "/empty/pack_a.rpf", handle) == Status::NotFound);
+        OVF_EXPECT(open_virtual_stream(empty_registry, "/data/pack_a.rpf", handle) == Status::NotFound);
+        OVF_EXPECT(!handle.valid);
+
+        // Traversal collapses inside the virtual namespace
+        OVF_EXPECT(open_virtual_stream(synth, "/volume/../data/./pack_b.rpf", handle) == Status::Ok);
+        OVF_EXPECT(handle.mount_index == 0u && handle.archive_index == 0u);
+
+        // Host-backed archives carry their host path and on-disk size
+        OVF_EXPECT(open_virtual_stream(host_registry, "/game/stream_0.ttpf", handle) == Status::Ok);
+        OVF_EXPECT(handle.valid && handle.size == 32u);
+        OVF_EXPECT(handle.host_path.filename() == "stream_0.ttpf");
+        OVF_EXPECT(open_virtual_stream(host_registry, "/game/notes.txt", handle) == Status::NotFound);
+
+        // A valid handle still honors the read alignment contract
+        OVF_EXPECT(open_virtual_stream(host_registry, "/game/pack_0.rpf", handle) == Status::Ok);
+        OVF_EXPECT(read_aligned_chunk(handle, 8, scratch, bytes_read) == Status::AlignmentError);
     }
 
     std::filesystem::remove_all(temp_dir, ec);

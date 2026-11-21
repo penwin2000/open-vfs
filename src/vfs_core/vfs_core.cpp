@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstddef>
 #include <fstream>
+#include <utility>
 #include <open_vfs/macros.hpp>
 
 namespace open_vfs::vfs_core {
@@ -366,14 +367,57 @@ std::optional<std::size_t> resolve_mount(const MountRegistry& registry,
     return best_match;
 }
 
-OPEN_VFS_STUB
+OPEN_VFS_IMPL
 Status open_virtual_stream(const MountRegistry& registry,
                            std::string_view virtual_path,
                            VirtualStreamHandle& out_handle) {
-    (void)registry;
-    (void)virtual_path;
     out_handle = VirtualStreamHandle{};
-    return Status::NotImplemented;
+
+    const std::string target = normalize_virtual_path(virtual_path);
+    if (target == "/") {
+        return Status::NotFound;
+    }
+
+    // Among mounts whose prefix covers the path, the longest prefix wins so a
+    // nested mount shadows its parent. Archives listed under a mount that does
+    // not cover the requested path are never opened through it.
+    bool found = false;
+    std::size_t best_prefix_length = 0;
+    VirtualStreamHandle best{};
+
+    for (std::size_t mount_idx = 0; mount_idx < registry.mounts.size(); ++mount_idx) {
+        const auto& mount = registry.mounts[mount_idx];
+        const std::string mount_prefix = normalize_virtual_path(mount.virtual_prefix);
+        if (!is_same_or_descendant(target, mount_prefix)) {
+            continue;
+        }
+        if (found && mount_prefix.size() <= best_prefix_length) {
+            continue;
+        }
+
+        for (std::size_t archive_idx = 0; archive_idx < mount.discovered_archives.size();
+             ++archive_idx) {
+            const auto& archive = mount.discovered_archives[archive_idx];
+            if (normalize_virtual_path(archive.virtual_root) != target) {
+                continue;
+            }
+            found = true;
+            best_prefix_length = mount_prefix.size();
+            best.mount_index = mount_idx;
+            best.archive_index = archive_idx;
+            best.offset = 0;
+            best.size = archive.file_size;
+            best.host_path = archive.host_path;
+            best.valid = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        return Status::NotFound;
+    }
+    out_handle = std::move(best);
+    return Status::Ok;
 }
 
 OPEN_VFS_STUB

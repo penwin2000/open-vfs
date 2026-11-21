@@ -62,6 +62,10 @@ struct VirtualStreamHandle {
     uint64_t offset = 0;
     uint64_t size = 0;
     bool valid = false;
+    // Archive the stream was opened on: its index inside
+    // `MountRegistry::mounts[mount_index].discovered_archives` and its host file.
+    std::size_t archive_index = 0;
+    std::filesystem::path host_path;
 };
 
 // Little-endian safe binary readers
