@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="220" viewBox="0 0 960 220" role="img" aria-label="open-vfs Clean-Room C++20 and DirectX 12 Windows 11 Runtime">
+  <defs>
+    <linearGradient id="heroBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0f14"/>
+      <stop offset="55%" stop-color="#0f1722"/>
+      <stop offset="100%" stop-color="#0d1b1e"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3fb950"/>
+      <stop offset="50%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#58a6ff"/>
+    </linearGradient>
+    <pattern id="subtleGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#1f2937" stroke-width="0.7" opacity="0.45"/>
+    </pattern>
+  </defs>
+
+  <!-- Base container -->
+  <rect x="0.5" y="0.5" width="959" height="219" rx="14" fill="url(#heroBg)" stroke="#263241" stroke-width="1"/>
+  <rect x="1" y="1" width="958" height="218" rx="13.5" fill="url(#subtleGrid)"/>
+
+  <!-- Top accent line -->
+  <rect x="32" y="0.5" width="220" height="2.5" rx="1.25" fill="url(#accentGrad)"/>
+
+  <!-- Minimalist geometric VFS stacked-layer emblem -->
+  <g transform="translate(52, 46)">
+    <!-- Outer frame -->
+    <rect x="0" y="0" width="128" height="128" rx="16" fill="#0d141d" stroke="#263547" stroke-width="1.25"/>
+    <!-- Layer 3 (bottom: XVD / Storage) -->
+    <polygon points="64,104 106,84 64,64 22,84" fill="#162230" stroke="#58a6ff" stroke-width="1.5"/>
+    <!-- Layer 2 (middle: RPF9 / RDS5 Containers) -->
+    <polygon points="64,84 106,64 64,44 22,64" fill="#12282a" stroke="#2dd4bf" stroke-width="1.5"/>
+    <!-- Layer 1 (top: Native DX12 Runtime) -->
+    <polygon points="64,64 106,44 64,24 22,44" fill="#132e22" stroke="#3fb950" stroke-width="1.75"/>
+    <!-- Core alignment node -->
+    <circle cx="64" cy="44" r="4.5" fill="#3fb950"/>
+  </g>
+
+  <!-- Title & subtitle -->
+  <text x="212" y="96" fill="#f0f6fc" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-size="44" font-weight="800" letter-spacing="-0.8">open-vfs</text>
+  <text x="214" y="128" fill="#9fb0c3" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="400">Clean-Room C++20 &amp; DirectX 12 Standalone Desktop Runtime for Local Console Archives</text>
+
+  <!-- Minimalist technical capability pills -->
+  <g transform="translate(214, 148)" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace" font-size="11.5" font-weight="600">
+    <rect x="0" y="0" width="84" height="24" rx="5" fill="#13241d" stroke="#2ea043" stroke-width="1"/>
+    <text x="42" y="16" text-anchor="middle" fill="#3fb950">VFS CORE</text>
+
+    <rect x="94" y="0" width="64" height="24" rx="5" fill="#16202c" stroke="#304358" stroke-width="1"/>
+    <text x="126" y="16" text-anchor="middle" fill="#79c0ff">RPF9</text>
+
+    <rect x="168" y="0" width="64" height="24" rx="5" fill="#16202c" stroke="#304358" stroke-width="1"/>
+    <text x="200" y="16" text-anchor="middle" fill="#79c0ff">RDS5</text>
+
+    <rect x="242" y="0" width="56" height="24" rx="5" fill="#16202c" stroke="#304358" stroke-width="1"/>
+    <text x="270" y="16" text-anchor="middle" fill="#79c0ff">XVD</text>
+
+    <rect x="308" y="0" width="82" height="24" rx="5" fill="#14242b" stroke="#2b5563" stroke-width="1"/>
+    <text x="349" y="16" text-anchor="middle" fill="#56d4dd">DX12 WIN11</text>
+
+    <rect x="400" y="0" width="90" height="24" rx="5" fill="#1b1f29" stroke="#374151" stroke-width="1"/>
+    <text x="445" y="16" text-anchor="middle" fill="#c9d1d9">CLEAN-ROOM</text>
+  </g>
+</svg>

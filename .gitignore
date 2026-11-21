@@ -1,0 +1,60 @@
+# Local console data dump files and asset archives (NEVER commit)
+*.rpf
+*.ttpf
+*.xvd
+*.bin
+*.dll
+*.exe
+*.pri
+*.xml
+*.config
+*.png
+*.alignmentchunk
+local_data/
+.open-vfs-repo/
+
+# Build outputs
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+Testing/
+*.dir/
+
+# Compiled binaries & MSVC artifacts
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.ipdb
+*.iobj
+*.suo
+*.user
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+.vs/
+x64/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Editor / OS clutter
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

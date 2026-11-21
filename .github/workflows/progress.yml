@@ -1,0 +1,141 @@
+name: Build, Test & Progress Map
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  build-and-progress:
+    name: Build open-vfs.exe, Run CTest & Render Tile Map
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure CMake (C++20 / x64)
+        shell: pwsh
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build open-vfs.exe & unit tests
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Run CTest synthetic-buffer test suite
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Smoke-test open-vfs.exe CLI
+        shell: pwsh
+        run: |
+          ./build/Release/open-vfs.exe --version
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/smoke_data" | Out-Null
+          ./build/Release/open-vfs.exe --data-dir "$env:RUNNER_TEMP/smoke_data" --headless
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Scan macros and regenerate progress.svg
+        shell: pwsh
+        run: |
+          python tools/progress.py --scan | Out-File -Encoding utf8 progress.json
+          python tools/progress.py --output progress.svg
+
+      - name: Commit updated progress.svg on main
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --quiet progress.svg
+          if ($LASTEXITCODE -ne 0) {
+            git add progress.svg
+            git commit -m "chore(progress): regenerate progress.svg [skip ci]"
+            git push origin HEAD:main
+          }
+
+      - name: Stage GitHub Pages site bundle
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path _site | Out-Null
+          Copy-Item progress.svg _site/progress.svg
+          Copy-Item progress.json _site/progress.json
+          Copy-Item assets/banner.svg _site/banner.svg
+          @'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>open-vfs — Live Porting Progress</title>
+            <style>
+              :root { color-scheme: dark; }
+              body {
+                margin: 0;
+                min-height: 100vh;
+                background: #090d13;
+                color: #e6edf3;
+                font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 36px 20px;
+                gap: 24px;
+              }
+              img { max-width: 960px; width: 100%; height: auto; }
+              footer { color: #8b949e; font-size: 13px; }
+              a { color: #58a6ff; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <img src="./banner.svg" alt="open-vfs hero banner" />
+            <img src="./progress.svg" alt="open-vfs subsystem tile map" />
+            <footer>
+              Clean-room C++20 &amp; DirectX 12 Windows 11 runtime &bull;
+              <a href="https://github.com/penwin2000/open-vfs">Repository</a> &bull;
+              <a href="./progress.svg">Raw SVG</a> &bull;
+              <a href="./progress.json">JSON Feed</a>
+            </footer>
+          </body>
+          </html>
+          '@ | Out-File -Encoding utf8 _site/index.html
+
+      - name: Configure GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy-pages:
+    name: Publish progress.svg to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build-and-progress
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
