@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstddef>
 #include <fstream>
+#include <limits>
 #include <utility>
 #include <open_vfs/macros.hpp>
 
@@ -420,18 +421,48 @@ Status open_virtual_stream(const MountRegistry& registry,
     return Status::Ok;
 }
 
-OPEN_VFS_STUB
+OPEN_VFS_IMPL
 Status read_aligned_chunk(const VirtualStreamHandle& handle,
                           uint64_t aligned_offset,
                           std::span<uint8_t> out_buffer,
                           std::size_t& out_bytes_read) {
-    (void)handle;
-    (void)out_buffer;
     out_bytes_read = 0;
     if (!is_aligned_16(aligned_offset)) {
         return Status::AlignmentError;
     }
-    return Status::NotImplemented;
+    if (!handle.valid || handle.host_path.empty()) {
+        return Status::InvalidArgument;
+    }
+    if (!is_aligned_16(handle.offset)) {
+        return Status::AlignmentError;
+    }
+    constexpr auto max_position = static_cast<uint64_t>(
+        (std::numeric_limits<std::streamoff>::max)());
+    if (handle.offset > max_position || handle.size > max_position - handle.offset ||
+        aligned_offset > handle.size) {
+        return Status::OutOfBounds;
+    }
+    const uint64_t count = (std::min)(handle.size - aligned_offset,
+                                     static_cast<uint64_t>(out_buffer.size()));
+    if (count > static_cast<uint64_t>((std::numeric_limits<std::streamsize>::max)())) {
+        return Status::OutOfBounds;
+    }
+    // EOF and empty requests succeed without opening the backing file.
+    if (count == 0) {
+        return Status::Ok;
+    }
+    std::ifstream file(handle.host_path, std::ios::binary);
+    if (!file.is_open()) {
+        return Status::IoError;
+    }
+    file.seekg(static_cast<std::streamoff>(handle.offset + aligned_offset), std::ios::beg);
+    if (!file) {
+        return Status::IoError;
+    }
+    file.read(reinterpret_cast<char*>(out_buffer.data()), static_cast<std::streamsize>(count));
+    out_bytes_read = static_cast<std::size_t>(file.gcount());
+    // A short physical read means the backing file no longer covers the handle.
+    return file && out_bytes_read == count ? Status::Ok : Status::IoError;
 }
 
 OPEN_VFS_IMPL

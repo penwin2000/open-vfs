@@ -97,6 +97,10 @@ Status open_virtual_stream(const MountRegistry& registry,
                            std::string_view virtual_path,
                            VirtualStreamHandle& out_handle);
 
+// Read at a stream-relative 16-byte-aligned offset; handle.offset must also be
+// aligned. The buffer length need not be aligned. Reads stop at handle.size;
+// EOF/empty reads succeed, offsets beyond EOF fail. A short backing-file read
+// returns IoError with the actual byte count. Every call resets out_bytes_read.
 Status read_aligned_chunk(const VirtualStreamHandle& handle,
                           uint64_t aligned_offset,
                           std::span<uint8_t> out_buffer,
